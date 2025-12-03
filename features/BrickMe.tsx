@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { generateCartoonAvatar } from '../services/gemini';
+import { generateCartoonAvatar, refinePixelArt } from '../services/gemini';
 import { BEAD_COLORS, BOARD_SIZES } from '../constants';
 import { BeadPattern, BeadPixel } from '../types';
 
@@ -44,6 +44,11 @@ export const BrickMe: React.FC = () => {
     const [stepStatus, setStepStatus] = useState('');
     const [viewMode, setViewMode] = useState<'visual' | 'chart'>('visual');
 
+    // Refine Modal State
+    const [showRefineModal, setShowRefineModal] = useState(false);
+    const [refinePrompt, setRefinePrompt] = useState('');
+    const [isRefining, setIsRefining] = useState(false);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -83,6 +88,29 @@ export const BrickMe: React.FC = () => {
             }
         };
         reader.readAsDataURL(file);
+    };
+
+    // Handle Refine Request
+    const handleRefine = async () => {
+        if (!cartoonImage || !refinePrompt.trim()) return;
+        
+        setIsRefining(true);
+        
+        try {
+            const newImage = await refinePixelArt(cartoonImage, refinePrompt);
+            if (newImage) {
+                setCartoonImage(newImage);
+                setShowRefineModal(false);
+                setRefinePrompt('');
+                // Automatically re-process pattern
+                processBeadPattern(newImage, boardSize);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Failed to refine image. Please try again.");
+        } finally {
+            setIsRefining(false);
+        }
     };
 
     // 2. Client-side Pixelation Logic
@@ -178,11 +206,13 @@ export const BrickMe: React.FC = () => {
     const cellSize = BASE_CELL_SIZE * zoomLevel;
 
     return (
-        <div className="h-full flex flex-col lg:flex-row gap-6">
+        // CRITICAL FIX: height is auto on mobile (scrollable), full on desktop (fixed app)
+        <div className="flex flex-col lg:flex-row gap-6 relative h-auto lg:h-full">
             <canvas ref={canvasRef} className="hidden" />
 
             {/* --- LEFT PANEL: INPUT --- */}
-            <div className="w-full lg:w-1/4 flex flex-col gap-6 no-print">
+            {/* Scrollable on desktop, stacked on mobile */}
+            <div className="w-full lg:w-1/4 flex flex-col gap-6 no-print lg:h-full lg:overflow-y-auto shrink-0">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h2 className="text-xl font-black text-slate-800 mb-4">1. Upload Photo</h2>
                     <div 
@@ -210,9 +240,17 @@ export const BrickMe: React.FC = () => {
                     <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                     
                     {cartoonImage && !isProcessing && (
-                        <p className="text-xs text-center text-slate-400 mt-2 font-medium">
-                            Converted to BrickHeadz Pixel Style
-                        </p>
+                        <div className="flex flex-col gap-2 mt-4">
+                            <p className="text-xs text-center text-slate-400 font-medium">
+                                Converted to BrickHeadz Pixel Style
+                            </p>
+                            <button 
+                                onClick={() => setShowRefineModal(true)}
+                                className="w-full bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 font-bold py-2 rounded-lg text-sm border border-slate-200 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <span>✨</span> Refine Image
+                            </button>
+                        </div>
                     )}
                 </div>
 
@@ -276,13 +314,39 @@ export const BrickMe: React.FC = () => {
                                     Drag slider or type a number (10-116). Standard Perler boards are 29x29.
                                 </p>
                             </div>
-                            
-                            {/* VIEW ZOOM */}
-                            <div>
-                                <label className="text-xs font-bold text-slate-400 uppercase flex justify-between items-center">
-                                    Zoom Level
-                                    <span className="text-indigo-600 font-mono">{Math.round(zoomLevel * 100)}%</span>
-                                </label>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* --- RIGHT PANEL: PATTERN + MATERIALS (Vertical Flex) --- */}
+            {/* Height fix: min-h defined so it doesn't collapse on mobile. full height on desktop */}
+            <div className="flex-1 flex flex-col min-w-0 gap-4 min-h-[600px] lg:h-full">
+                
+                {/* --- TOP: VIEWPORT (FIXED FRAME) --- */}
+                <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative">
+                    
+                    {/* TOOLBAR */}
+                    <div className="border-b border-slate-100 p-4 flex justify-between items-center bg-slate-50 no-print z-10 relative shrink-0">
+                         <div className="flex items-center gap-4">
+                             <div className="flex gap-1 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+                                 <button 
+                                    onClick={() => setViewMode('visual')}
+                                    className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'visual' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                                 >
+                                    Visual
+                                 </button>
+                                 <button 
+                                    onClick={() => setViewMode('chart')}
+                                    className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'chart' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                                 >
+                                    Chart
+                                 </button>
+                             </div>
+                             
+                             {/* ZOOM SLIDER IN TOOLBAR */}
+                             <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-400">🔍</span>
                                 <input 
                                     type="range"
                                     min="0.5" 
@@ -290,138 +354,149 @@ export const BrickMe: React.FC = () => {
                                     step="0.1"
                                     value={zoomLevel}
                                     onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
-                                    className="w-full mt-3 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                    className="w-24 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                                 />
-                            </div>
-
-                        </div>
+                             </div>
+                         </div>
+                         <button onClick={() => window.print()} className="flex items-center gap-2 text-slate-600 font-bold text-sm hover:text-indigo-600 hover:bg-indigo-50 px-4 py-2 rounded-lg transition-colors">
+                             <span>🖨️</span> Print PDF
+                         </button>
                     </div>
-                )}
-            </div>
 
-            {/* --- RIGHT PANEL: PATTERN --- */}
-            <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden min-h-[600px]">
-                
-                {/* TOOLBAR */}
-                <div className="border-b border-slate-100 p-4 flex justify-between items-center bg-slate-50 no-print">
-                     <div className="flex gap-1 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
-                         <button 
-                            onClick={() => setViewMode('visual')}
-                            className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'visual' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
-                         >
-                            Visual
-                         </button>
-                         <button 
-                            onClick={() => setViewMode('chart')}
-                            className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'chart' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
-                         >
-                            Chart
-                         </button>
-                     </div>
-                     <button onClick={() => window.print()} className="flex items-center gap-2 text-slate-600 font-bold text-sm hover:text-indigo-600 hover:bg-indigo-50 px-4 py-2 rounded-lg transition-colors">
-                         <span>🖨️</span> Print PDF
-                     </button>
-                </div>
-
-                {/* CANVAS AREA - SCROLLABLE */}
-                <div className="flex-1 overflow-auto p-4 md:p-8 bg-slate-50/50 print:bg-white print:p-0">
-                    {pattern ? (
-                        <div className="flex flex-col items-center gap-8 w-full print:max-w-none min-w-min">
-                            
-                            {/* THE GRID */}
-                            <div 
-                                className="bg-white shadow-xl rounded-xl p-1 relative border border-slate-200 print:shadow-none print:border-none"
-                                style={{
-                                    display: 'grid',
-                                    // FORCE FIXED PIXEL SIZE PER CELL
-                                    gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
-                                    // FORCE TOTAL WIDTH TO TRIGGER SCROLL IF NEEDED
-                                    width: `${pattern.width * cellSize}px`,
-                                    height: `${pattern.height * cellSize}px`
-                                }}
-                            >
-                                {pattern.pixels.map((p, i) => (
-                                    <div 
-                                        key={i}
-                                        style={{ 
-                                            // FORCE FIXED PIXEL SIZE PER CELL
-                                            width: `${cellSize}px`,
-                                            height: `${cellSize}px`,
-                                            // IN CHART MODE: Use faint color background (opacity 0.2) + Symbol
-                                            backgroundColor: viewMode === 'visual' ? p.color.hex : `${p.color.hex}33`, 
-                                            gridColumn: p.x + 1,
-                                            gridRow: p.y + 1,
-                                        }}
-                                        className={`relative border-[0.5px] border-slate-100 flex items-center justify-center ${viewMode === 'visual' ? 'rounded-full scale-90 shadow-sm' : ''}`}
-                                    >
-                                        {/* HOLE in bead mode */}
-                                        {viewMode === 'visual' && (
-                                            <div className="w-[30%] h-[30%] bg-slate-900/10 rounded-full shadow-inner pointer-events-none" />
-                                        )}
-
-                                        {/* SYMBOL in chart mode */}
-                                        {viewMode === 'chart' && (
-                                            <span 
-                                                className="font-bold text-slate-700 leading-none select-none"
-                                                style={{ fontSize: `${cellSize * 0.6}px` }}
-                                            >
-                                                {p.color.symbol}
-                                            </span>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-
-                        </div>
-                    ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-300">
-                             <div className="text-6xl mb-4">🧱</div>
-                             <p className="font-bold text-lg">Your pattern will appear here</p>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* --- RIGHTMOST: MATERIAL LIST --- */}
-             {pattern && (
-                 <div className="w-full lg:w-64 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 overflow-y-auto max-h-[800px] no-print">
-                    <h3 className="text-lg font-black text-slate-800 mb-4 flex justify-between items-center">
-                        Materials
-                        <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500">
-                            {pattern.pixels.length} beads
-                        </span>
-                    </h3>
-                    <div className="space-y-3">
-                        {Object.entries(pattern.counts)
-                            .sort(([, a], [, b]) => b - a)
-                            .map(([colorId, count]) => {
-                                const color = BEAD_COLORS.find(c => c.id === colorId);
-                                if (!color) return null;
-                                return (
-                                    <div key={colorId} className="flex items-center gap-3 text-sm">
+                    {/* SCROLLABLE CONTENT AREA */}
+                    <div className="flex-1 relative overflow-hidden bg-slate-50/50">
+                        {/* The absolute container allows scrolling ONLY inside this frame */}
+                        <div className="absolute inset-0 overflow-auto flex items-center justify-center p-8 print:p-0 print:static print:overflow-visible">
+                            {pattern ? (
+                                <div 
+                                    className="bg-white shadow-xl rounded-xl p-1 border border-slate-200 print:shadow-none print:border-none"
+                                    style={{
+                                        display: 'grid',
+                                        // FORCE FIXED PIXEL SIZE PER CELL
+                                        gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
+                                        // FORCE TOTAL SIZE to be SQUARE based on pattern size
+                                        width: `${pattern.width * cellSize}px`,
+                                        height: `${pattern.height * cellSize}px`
+                                    }}
+                                >
+                                    {pattern.pixels.map((p, i) => (
                                         <div 
-                                            className="w-8 h-8 rounded-full shadow-sm border border-slate-100 flex items-center justify-center font-bold text-sm text-slate-700"
-                                            style={{ backgroundColor: color.hex }}
+                                            key={i}
+                                            style={{ 
+                                                width: `${cellSize}px`,
+                                                height: `${cellSize}px`,
+                                                backgroundColor: viewMode === 'visual' ? p.color.hex : `${p.color.hex}33`, 
+                                                gridColumn: p.x + 1,
+                                                gridRow: p.y + 1,
+                                            }}
+                                            className={`relative border-[0.5px] border-slate-100 flex items-center justify-center ${viewMode === 'visual' ? 'rounded-full scale-90 shadow-sm' : ''}`}
                                         >
-                                            {viewMode === 'chart' ? color.symbol : ''}
+                                            {viewMode === 'visual' && (
+                                                <div className="w-[30%] h-[30%] bg-slate-900/10 rounded-full shadow-inner pointer-events-none" />
+                                            )}
+                                            {viewMode === 'chart' && (
+                                                <span 
+                                                    className="font-bold text-slate-700 leading-none select-none"
+                                                    style={{ fontSize: `${cellSize * 0.6}px` }}
+                                                >
+                                                    {p.color.symbol}
+                                                </span>
+                                            )}
                                         </div>
-                                        <div className="flex-1">
-                                            <div className="font-bold text-slate-700">{color.name}</div>
-                                            <div className="text-xs text-slate-400">
-                                                {color.id} <span className="font-mono bg-slate-100 px-1 rounded ml-1 text-slate-500">{color.symbol}</span>
-                                            </div>
-                                        </div>
-                                        <div className="font-mono font-bold text-slate-600">
-                                            x{count}
-                                        </div>
-                                    </div>
-                                )
-                            })
-                        }
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center text-slate-300">
+                                     <div className="text-6xl mb-4">🧱</div>
+                                     <p className="font-bold text-lg">Pattern View</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                 </div>
-             )}
+                </div>
 
+                {/* --- BOTTOM: MATERIALS (HORIZONTAL) --- */}
+                 {pattern && (
+                     <div className="h-48 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 overflow-hidden flex flex-col no-print shrink-0">
+                        <div className="flex justify-between items-center mb-2 shrink-0">
+                            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Materials</h3>
+                            <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 font-bold">
+                                {pattern.pixels.length} beads
+                            </span>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto pr-2">
+                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                                {Object.entries(pattern.counts)
+                                    .sort(([, a], [, b]) => b - a)
+                                    .map(([colorId, count]) => {
+                                        const color = BEAD_COLORS.find(c => c.id === colorId);
+                                        if (!color) return null;
+                                        return (
+                                            <div key={colorId} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                                <div 
+                                                    className="w-6 h-6 rounded-full shadow-sm border border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-700 shrink-0"
+                                                    style={{ backgroundColor: color.hex }}
+                                                >
+                                                    {viewMode === 'chart' ? color.symbol : ''}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="font-bold text-slate-700 text-xs truncate">{color.name}</div>
+                                                    <div className="text-[10px] text-slate-400 font-mono">x{count}</div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })
+                                }
+                            </div>
+                        </div>
+                     </div>
+                 )}
+            </div>
+
+            {/* --- EDIT MODAL --- */}
+            {showRefineModal && (
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
+                        <h3 className="text-xl font-black text-slate-800 mb-2">Refine with AI</h3>
+                        <p className="text-slate-500 text-sm mb-4">
+                            Describe what needs to be fixed. <br/>
+                            <span className="text-xs italic opacity-70">"Make the guitar border white", "Make hair brighter"</span>
+                        </p>
+                        
+                        <textarea 
+                            value={refinePrompt}
+                            onChange={(e) => setRefinePrompt(e.target.value)}
+                            placeholder="What should we change?"
+                            className="w-full border-2 border-slate-200 rounded-xl p-3 text-slate-700 focus:border-indigo-500 outline-none h-24 mb-4 resize-none"
+                            autoFocus
+                        />
+                        
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => setShowRefineModal(false)}
+                                disabled={isRefining}
+                                className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={handleRefine}
+                                disabled={isRefining || !refinePrompt.trim()}
+                                className="flex-1 py-3 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+                            >
+                                {isRefining ? (
+                                    <>
+                                        <span className="animate-spin">🔄</span> Refining...
+                                    </>
+                                ) : (
+                                    <>✨ Generate</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

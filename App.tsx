@@ -10,7 +10,7 @@ const App: React.FC = () => {
 
   // Common Header
   const Header = () => (
-    <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between sticky top-0 z-50 no-print">
+    <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between sticky top-0 z-50 no-print shrink-0">
       <div 
         className="flex items-center gap-2 cursor-pointer" 
         onClick={() => setView(ViewMode.LANDING)}
@@ -103,15 +103,19 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] flex flex-col">
+    <div className="h-screen bg-[#FDFDFD] flex flex-col overflow-hidden">
       <Header />
       
-      <main className="flex-1 overflow-hidden">
+      {/* 
+          CRITICAL FIX: 
+          On mobile, main is auto/scroll so content pushes down.
+          On desktop (lg), main is hidden/flex so we can use inner scrollable areas.
+      */}
+      <main className="flex-1 overflow-y-auto lg:overflow-hidden">
         {view === ViewMode.LANDING && <Landing />}
         
         <div className={`h-full max-w-7xl mx-auto p-4 md:p-6 ${view === ViewMode.LANDING ? 'hidden' : 'block'}`}>
             {view === ViewMode.BEADME && <BrickMe />}
-            {/* Reuse StickerMaker as a placeholder for Gallery or other features if needed, or just hide */}
             {view === ViewMode.GALLERY && (
                 <div className="text-center mt-20">
                     <h2 className="text-2xl font-bold text-slate-700">Gallery Coming Soon</h2>

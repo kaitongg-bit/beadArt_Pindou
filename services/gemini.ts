@@ -22,22 +22,19 @@ export const generateCartoonAvatar = async (base64Image: string): Promise<string
             }
         };
 
-        // UPDATED PROMPT: BRICKHEADZ STYLE PIXEL ART
-        // The user specifically wants the "Square Head" LEGO look, but as a bead pattern.
-        // We force a "Front View" to ensure the pixel grid aligns well.
+        // UPDATED PROMPT: STRICT SQUARE ASPECT RATIO
         const prompt = `
         Redraw this person as a 2D PIXEL ART character in the exact style of a LEGO BRICKHEADZ figure.
 
         STRICT VISUAL RULES:
-        1. CANVAS: Image MUST be a PERFECT 1:1 SQUARE.
-        2. COMPOSITION: Full body visible within the square. DO NOT CROP THE FEET or HEAD. Leave white padding around the figure.
-        3. HEAD SHAPE: Must be a large, perfect SQUARE/CUBE shape with slightly rounded corners.
-        4. EYES: Two distinct black circular dots, widely spaced (classic BrickHeadz eyes).
-        5. PROPORTIONS: Chibi style. Head ~50%, Body+Legs ~50%.
-        6. VIEW ANGLE: Direct FRONT view (flat 2D). No complex perspective.
+        1. CANVAS SHAPE: Image MUST be a PERFECT 1:1 SQUARE (e.g. 1024x1024).
+        2. ASPECT RATIO HANDLING: If the character is tall (like a standing person), ADD WHITE PADDING on the left and right. DO NOT STRETCH the character to make them wide. DO NOT CROP the head or feet.
+        3. COMPOSITION: The character must be fully visible from head to toe within the square.
+        4. HEAD SHAPE: Large, perfect SQUARE/CUBE shape with slightly rounded corners (BrickHeadz style).
+        5. EYES: Two distinct black circular dots, widely spaced.
+        6. VIEW ANGLE: Direct FRONT view (flat 2D).
         7. STYLE: Pixel art. Clean lines. Flat vibrant colors. No gradients.
-        8. BACKGROUND: PURE SOLID WHITE (#FFFFFF) ONLY. Remove all scenery.
-        9. ASPECT RATIO: Maintain the natural aspect ratio of the character. DO NOT STRETCH the character wide or tall to fill the square. It is better to have more white space than a distorted character.
+        8. BACKGROUND: PURE SOLID WHITE (#FFFFFF) ONLY. No scenery.
         
         Output only the image.
         `;
@@ -55,6 +52,47 @@ export const generateCartoonAvatar = async (base64Image: string): Promise<string
         return null;
     } catch (e) {
         console.error("Cartoonize Error:", e);
+        return null;
+    }
+};
+
+export const refinePixelArt = async (base64Image: string, instruction: string): Promise<string | null> => {
+    const ai = getClient();
+    if (!ai) return null;
+
+    try {
+        const imagePart = {
+            inlineData: {
+                data: base64Image.split(',')[1],
+                mimeType: 'image/png' // Assuming previous output is PNG
+            }
+        };
+
+        const prompt = `
+        Edit this pixel art character based on the user's instruction.
+        
+        USER INSTRUCTION: "${instruction}"
+
+        STRICT RULES:
+        1. OUTPUT MUST BE A 1:1 SQUARE. Maintain the padding if necessary.
+        2. MAINTAIN the current Lego BrickHeadz pixel art style exactly.
+        3. ONLY change the specific details mentioned in the instruction.
+        4. Output the result on a PURE WHITE background.
+        `;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [imagePart, { text: prompt }] }
+        });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                return `data:image/png;base64,${part.inlineData.data}`;
+            }
+        }
+        return null;
+    } catch (e) {
+        console.error("Refine Error:", e);
         return null;
     }
 };
