@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BrickGift - Custom Brick Gifts</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&display=swap');
+      body {
+        font-family: 'Fredoka', sans-serif;
+        background-color: #f8fafc;
+      }
+      /* Custom scrollbar for component lists */
+      .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+      }
+      .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+      .lego-pattern {
+        background-color: #f8fafc;
+        background-image: radial-gradient(#cbd5e1 2px, transparent 2px);
+        background-size: 24px 24px;
+      }
+
+      /* 3D Transform Utilities for BrickMe Preview */
+      .perspective-800 {
+        perspective: 800px;
+      }
+      .transform-style-3d {
+        transform-style: preserve-3d;
+      }
+      .translate-z-16 {
+        transform: translateZ(64px); /* 4rem */
+      }
+      .rotate-x-90 {
+        transform: rotateX(90deg);
+      }
+      
+      @keyframes float {
+        0%, 100% { transform: rotateY(-10deg) translateY(0); }
+        50% { transform: rotateY(10deg) translateY(-10px); }
+      }
+      .animate-float {
+        animation: float 6s ease-in-out infinite;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "uuid": "https://esm.sh/uuid@9.0.1"
+  }
+}
+</script>
+</head>
+  <body class="lego-pattern">
+    <div id="root"></div>
+  </body>
+</html>
