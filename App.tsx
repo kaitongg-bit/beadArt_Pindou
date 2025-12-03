@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { ViewMode } from './types';
 import { BrickMe } from './features/BrickMe';
@@ -41,9 +40,8 @@ const App: React.FC = () => {
           </nav>
       )}
 
-      <button className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors">
-        Export PDF
-      </button>
+      {/* Spacer to keep alignment */}
+      <div className="w-4"></div>
     </header>
   );
 

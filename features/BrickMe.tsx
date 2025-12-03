@@ -2,9 +2,17 @@ import React, { useState, useRef, useEffect } from 'react';
 import { generateCartoonAvatar, refinePixelArt } from '../services/gemini';
 import { BEAD_COLORS, BOARD_SIZES } from '../constants';
 import { BeadPattern, BeadPixel } from '../types';
+import { jsPDF } from "jspdf";
 
 // --- UTILS ---
 const getNearestBeadColor = (r: number, g: number, b: number) => {
+    // 1. Dark Threshold (Black Crush)
+    // Fixes the "Green Hair" issue. If a pixel is very dark, force it to Black (P14).
+    // This ignores subtle noise in dark areas.
+    if (r < 35 && g < 35 && b < 35) {
+        return BEAD_COLORS.find(c => c.id === 'P14') || BEAD_COLORS[0];
+    }
+
     let minDiff = Infinity;
     let nearest = BEAD_COLORS[0];
 
@@ -13,9 +21,18 @@ const getNearestBeadColor = (r: number, g: number, b: number) => {
         const cg = parseInt(color.hex.substring(3, 5), 16);
         const cb = parseInt(color.hex.substring(5, 7), 16);
         
-        // Euclidean distance sufficient for this use case
+        // 2. Weighted Distance (Redmean Approximation)
+        // Human eyes are more sensitive to Green. This formula provides better perceptual matching
+        // than standard Euclidean distance.
+        const rmean = (r + cr) / 2;
+        const dr = r - cr;
+        const dg = g - cg;
+        const db = b - cb;
+        
         const diff = Math.sqrt(
-            Math.pow(r - cr, 2) + Math.pow(g - cg, 2) + Math.pow(b - cb, 2)
+            (((512 + rmean) * dr * dr) >> 8) + 
+            4 * dg * dg + 
+            (((767 - rmean) * db * db) >> 8)
         );
 
         if (diff < minDiff) {
@@ -35,7 +52,6 @@ const padImageToSquare = (base64Str: string): Promise<string> => {
         img.onload = () => {
             const maxDim = Math.max(img.width, img.height);
             // ADD 30% PADDING total (15% per side) to the source canvas
-            // This is the "Nuclear Option" to ensure heads/feet are NEVER cut off
             const padding = maxDim * 0.30; 
             const canvasSize = maxDim + (padding * 2);
             
@@ -79,6 +95,7 @@ export const BrickMe: React.FC = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [stepStatus, setStepStatus] = useState('');
     const [viewMode, setViewMode] = useState<'visual' | 'chart'>('visual');
+    const [isExporting, setIsExporting] = useState(false);
 
     // Refine Modal State
     const [showRefineModal, setShowRefineModal] = useState(false);
@@ -105,10 +122,173 @@ export const BrickMe: React.FC = () => {
         const scaleW = availableW / contentW;
         const scaleH = availableH / contentH;
         
-        // Fit to smallest dimension, capped at 1.0 (don't zoom in too much automatically)
-        // But allow zooming OUT as much as needed (e.g. 0.2)
+        // Fit to smallest dimension, capped at 1.0
         const newZoom = Math.min(scaleW, scaleH, 1.0);
         setZoomLevel(Math.max(0.1, newZoom));
+    };
+
+    // Export PDF Logic
+    const handleExportPDF = () => {
+        if (!pattern) return;
+        setIsExporting(true);
+
+        try {
+            const pdfCanvas = document.createElement('canvas');
+            const CELL_PX = 30; // High resolution pixels per bead
+            const HEADER_HEIGHT = 100;
+            const LEGEND_ITEM_HEIGHT = 30;
+            const LEGEND_HEADER_HEIGHT = 60;
+            const LEGEND_COL_WIDTH = 250;
+            const ITEMS_PER_COL = 15;
+            
+            // Calculate Legend dimensions
+            const distinctColors = Object.entries(pattern.counts);
+            const numCols = Math.ceil(distinctColors.length / ITEMS_PER_COL);
+            const legendHeight = LEGEND_HEADER_HEIGHT + (Math.min(distinctColors.length, ITEMS_PER_COL) * LEGEND_ITEM_HEIGHT) + 50;
+
+            const WIDTH = pattern.width * CELL_PX;
+            const HEIGHT = (pattern.height * CELL_PX) + HEADER_HEIGHT + legendHeight;
+            
+            // Allow for wider canvas if legend needs it
+            const MIN_WIDTH = numCols * LEGEND_COL_WIDTH + 40;
+            pdfCanvas.width = Math.max(WIDTH, MIN_WIDTH);
+            pdfCanvas.height = HEIGHT;
+            
+            const ctx = pdfCanvas.getContext('2d');
+            if (!ctx) return;
+
+            // Background
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, pdfCanvas.width, pdfCanvas.height);
+
+            // Header
+            ctx.fillStyle = '#1e293b';
+            ctx.font = 'bold 60px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText("BeadGift Pattern", pdfCanvas.width / 2, 60);
+
+            // Draw Grid
+            // Center grid horizontally if canvas is wider than grid
+            const gridXOffset = (pdfCanvas.width - (pattern.width * CELL_PX)) / 2;
+            const gridYOffset = HEADER_HEIGHT;
+            
+            ctx.translate(gridXOffset, gridYOffset);
+            
+            // Draw beads
+            pattern.pixels.forEach(p => {
+                const x = p.x * CELL_PX;
+                const y = p.y * CELL_PX;
+                const cx = x + CELL_PX / 2;
+                const cy = y + CELL_PX / 2;
+                const radius = (CELL_PX / 2) - 1; // Leave slight gap
+
+                // Draw Bead (Circle)
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+                ctx.fillStyle = p.color.hex;
+                ctx.fill();
+                
+                // Draw Border (Stroke)
+                ctx.strokeStyle = '#e2e8f0'; // Subtle border for white beads
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Draw Bead Hole (Small white circle in middle)
+                if (viewMode === 'visual') {
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, radius * 0.25, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'rgba(255,255,255,0.4)'; // Subtle hole
+                    ctx.fill();
+                }
+
+                // Symbol (if in chart mode, or overlay on PDF)
+                // For PDF, we always show symbols if they fit, or maybe just logic based on user pref
+                // Here we reproduce the "Chart View" logic essentially
+                const r = parseInt(p.color.hex.slice(1,3), 16);
+                const g = parseInt(p.color.hex.slice(3,5), 16);
+                const b = parseInt(p.color.hex.slice(5,7), 16);
+                const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                
+                ctx.fillStyle = brightness > 125 ? '#000000' : '#FFFFFF';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                // Only show symbol if it fits comfortably
+                ctx.fillText(p.color.symbol, cx, cy);
+            });
+
+            // Draw Materials List at bottom
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            const legendYStart = gridYOffset + (pattern.height * CELL_PX) + 40;
+            ctx.translate(20, legendYStart);
+            
+            ctx.fillStyle = '#0f172a';
+            ctx.font = 'bold 40px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText("Materials List", 0, 0);
+
+            const counts = Object.entries(pattern.counts).sort(([, a], [, b]) => b - a);
+            
+            counts.forEach((entry, idx) => {
+                const [colorId, count] = entry;
+                const color = BEAD_COLORS.find(c => c.id === colorId);
+                if (!color) return;
+
+                const col = Math.floor(idx / ITEMS_PER_COL);
+                const row = idx % ITEMS_PER_COL;
+                
+                const xPos = col * LEGEND_COL_WIDTH;
+                const yPos = 40 + (row * LEGEND_ITEM_HEIGHT);
+
+                // Color box
+                ctx.fillStyle = color.hex;
+                ctx.beginPath();
+                ctx.arc(xPos + 10, yPos - 10, 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#94a3b8';
+                ctx.stroke();
+
+                // Symbol
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(color.symbol, xPos + 10, yPos - 10 + 4);
+
+                // Name & Count
+                ctx.textAlign = 'left';
+                ctx.font = '20px sans-serif';
+                ctx.fillText(`${color.name} (x${count})`, xPos + 30, yPos - 2);
+            });
+
+            // 2. Generate PDF
+            const imgData = pdfCanvas.toDataURL('image/jpeg', 0.85);
+            const pdf = new jsPDF({
+                orientation: pdfCanvas.width > pdfCanvas.height ? 'l' : 'p',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            
+            // Fit canvas to PDF page
+            const ratio = Math.min(pdfWidth / pdfCanvas.width, pdfHeight / pdfCanvas.height);
+            const printW = pdfCanvas.width * ratio;
+            const printH = pdfCanvas.height * ratio;
+            
+            // Center on page
+            const marginX = (pdfWidth - printW) / 2;
+            const marginY = (pdfHeight - printH) / 2;
+            
+            pdf.addImage(imgData, 'JPEG', marginX, marginY, printW, printH);
+            pdf.save('bead-pattern.pdf');
+
+        } catch (e) {
+            console.error(e);
+            alert("Failed to export PDF.");
+        } finally {
+            setIsExporting(false);
+        }
     };
 
     // 1. Handle Upload & AI Stylization
@@ -124,21 +304,15 @@ export const BrickMe: React.FC = () => {
         const reader = new FileReader();
         reader.onload = async (event) => {
             const rawBase64 = event.target?.result as string;
-            
-            // STEP 1: FORCE SQUARE ASPECT RATIO WITH PADDING
-            // This ensures the AI gets a square canvas with whitespace
             const squareBase64 = await padImageToSquare(rawBase64);
-            
             setOriginalImage(squareBase64);
             setStepStatus('Generating BrickHeadz style pixel art...');
 
             try {
-                // Call Gemini to "clean up" the image for pixelation
                 const aiResult = await generateCartoonAvatar(squareBase64);
                 if (aiResult) {
                     setCartoonImage(aiResult);
                     setStepStatus('Quantizing colors to bead palette...');
-                    // Automatically trigger pixelation after AI result
                     setTimeout(() => processBeadPattern(aiResult, boardSize), 100);
                 } else {
                     setStepStatus('AI failed, using original image...');
@@ -155,19 +329,15 @@ export const BrickMe: React.FC = () => {
         reader.readAsDataURL(file);
     };
 
-    // Handle Refine Request
     const handleRefine = async () => {
         if (!cartoonImage || !refinePrompt.trim()) return;
-        
         setIsRefining(true);
-        
         try {
             const newImage = await refinePixelArt(cartoonImage, refinePrompt);
             if (newImage) {
                 setCartoonImage(newImage);
                 setShowRefineModal(false);
                 setRefinePrompt('');
-                // Automatically re-process pattern
                 processBeadPattern(newImage, boardSize);
             }
         } catch (e) {
@@ -180,17 +350,14 @@ export const BrickMe: React.FC = () => {
 
     // 2. Client-side Pixelation Logic
     const processBeadPattern = (imgSrc: string, size: number) => {
-        if (!size || size < 5) return; // Safety check
+        if (!size || size < 5) return; 
 
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // DISABLE SMOOTHING for pixel art crispness
         ctx.imageSmoothingEnabled = false;
-
-        // Extra Contrast Boost Filter
         ctx.filter = 'contrast(1.2) saturate(1.2)';
 
         const img = new Image();
@@ -199,27 +366,18 @@ export const BrickMe: React.FC = () => {
             canvas.width = size;
             canvas.height = size;
             
-            // Draw White Background first
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, size, size);
 
-            // LOGIC CHANGE: AGGRESSIVE SAFETY MARGIN PADDING
-            // Scale to 85% (was 90%) of the grid to ensure edge beads are empty
             const PADDING_FACTOR = 0.85; 
-            
-            // "CONTAIN" logic with Padding
-            // Use Math.floor to ensure integer coordinates
             const scale = (size * PADDING_FACTOR) / Math.max(img.width, img.height);
             const drawWidth = Math.floor(img.width * scale);
             const drawHeight = Math.floor(img.height * scale);
             
-            // Center the image strictly
             const dx = Math.floor((size - drawWidth) / 2);
             const dy = Math.floor((size - drawHeight) / 2);
 
             ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, drawWidth, drawHeight);
-            
-            // Reset filter
             ctx.filter = 'none';
 
             const imageData = ctx.getImageData(0, 0, size, size);
@@ -236,19 +394,12 @@ export const BrickMe: React.FC = () => {
                     const b = data[i + 2];
                     const a = data[i + 3];
 
-                    // 1. Ignore transparent pixels
+                    // White / Transparent background removal
                     if (a < 50) continue;
-
-                    // 2. Ignore WHITE Background pixels
-                    // Strict threshold to catch the white background requested
-                    // Using 250 to avoid cutting off light hair
                     if (r > 250 && g > 250 && b > 250) continue;
 
                     const matchedColor = getNearestBeadColor(r, g, b);
-                    
                     newPixels.push({ x, y, color: matchedColor });
-                    
-                    // Count stats
                     counts[matchedColor.id] = (counts[matchedColor.id] || 0) + 1;
                 }
             }
@@ -256,15 +407,11 @@ export const BrickMe: React.FC = () => {
             setPattern({ width: size, height: size, pixels: newPixels, counts });
             setIsProcessing(false);
             setStepStatus('');
-            
-            // Auto fit after processing
             setTimeout(handleAutoFit, 100);
         };
     };
 
-    // Re-run pixelation if board size changes
     useEffect(() => {
-        // Debounce slightly to allow typing numbers
         const timer = setTimeout(() => {
             if (cartoonImage) processBeadPattern(cartoonImage, boardSize);
             else if (originalImage) processBeadPattern(originalImage, boardSize);
@@ -273,16 +420,13 @@ export const BrickMe: React.FC = () => {
     }, [boardSize]);
 
 
-    // Calculate cell size based on zoom
     const cellSize = BASE_CELL_SIZE * zoomLevel;
 
     return (
-        // CRITICAL FIX: height is auto on mobile (scrollable), full on desktop (fixed app)
         <div className="flex flex-col lg:flex-row gap-6 relative h-auto lg:h-full print:h-auto print:block">
             <canvas ref={canvasRef} className="hidden" />
 
             {/* --- LEFT PANEL: INPUT --- */}
-            {/* Scrollable on desktop, stacked on mobile */}
             <div className="w-full lg:w-1/4 flex flex-col gap-6 no-print lg:h-full lg:overflow-y-auto shrink-0">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h2 className="text-xl font-black text-slate-800 mb-4">1. Upload Photo</h2>
@@ -312,9 +456,6 @@ export const BrickMe: React.FC = () => {
                     
                     {cartoonImage && !isProcessing && (
                         <div className="flex flex-col gap-2 mt-4">
-                            <p className="text-xs text-center text-slate-400 font-medium">
-                                Converted to BrickHeadz Pixel Style
-                            </p>
                             <button 
                                 onClick={() => setShowRefineModal(true)}
                                 className="w-full bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 font-bold py-2 rounded-lg text-sm border border-slate-200 transition-colors flex items-center justify-center gap-2"
@@ -329,8 +470,6 @@ export const BrickMe: React.FC = () => {
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                         <h2 className="text-xl font-black text-slate-800 mb-4">2. Settings</h2>
                         <div className="space-y-6">
-                            
-                            {/* PRESETS */}
                             <div>
                                 <label className="text-xs font-bold text-slate-400 uppercase">Board Presets</label>
                                 <div className="flex gap-2 mt-2">
@@ -338,40 +477,34 @@ export const BrickMe: React.FC = () => {
                                         onClick={() => setBoardSize(29)}
                                         className={`flex-1 py-3 rounded-xl text-sm font-bold border-2 transition-all ${boardSize === 29 ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-100 text-slate-400 hover:border-slate-300'}`}
                                     >
-                                        Midi
-                                        <span className="block text-[10px] font-normal opacity-70">29x29</span>
+                                        Midi (29px)
                                     </button>
                                     <button 
                                         onClick={() => setBoardSize(58)}
                                         className={`flex-1 py-3 rounded-xl text-sm font-bold border-2 transition-all ${boardSize === 58 ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-100 text-slate-400 hover:border-slate-300'}`}
                                     >
-                                        Maxi
-                                        <span className="block text-[10px] font-normal opacity-70">58x58</span>
+                                        Maxi (58px)
                                     </button>
                                 </div>
                             </div>
 
-                            {/* CUSTOM SIZE */}
                             <div>
                                 <label className="text-xs font-bold text-slate-400 uppercase flex justify-between items-center">
                                     Custom Grid Size
                                     <span className="text-indigo-600 font-mono">{boardSize}px</span>
                                 </label>
                                 <div className="flex items-center gap-3 mt-2">
-                                    <div className="relative w-full">
-                                        <input
-                                            type="number"
-                                            min="10"
-                                            max="116"
-                                            value={boardSize}
-                                            onChange={(e) => {
-                                                const val = parseInt(e.target.value);
-                                                if (!isNaN(val)) setBoardSize(val);
-                                            }}
-                                            className="w-full border-2 border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:border-indigo-500 outline-none transition-colors"
-                                        />
-                                        <div className="absolute right-3 top-2.5 text-xs font-bold text-slate-300 pointer-events-none">PX</div>
-                                    </div>
+                                    <input
+                                        type="number"
+                                        min="10"
+                                        max="116"
+                                        value={boardSize}
+                                        onChange={(e) => {
+                                            const val = parseInt(e.target.value);
+                                            if (!isNaN(val)) setBoardSize(val);
+                                        }}
+                                        className="w-full border-2 border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:border-indigo-500 outline-none transition-colors"
+                                    />
                                 </div>
                                 <input 
                                     type="range"
@@ -381,23 +514,18 @@ export const BrickMe: React.FC = () => {
                                     onChange={(e) => setBoardSize(parseInt(e.target.value))}
                                     className="w-full mt-3 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                                 />
-                                <p className="text-[10px] text-slate-400 mt-2 leading-tight">
-                                    Drag slider or type a number (10-116). Standard Perler boards are 29x29.
-                                </p>
                             </div>
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* --- RIGHT PANEL: PATTERN + MATERIALS (Vertical Flex) --- */}
-            {/* Height fix: min-h defined so it doesn't collapse on mobile. full height on desktop */}
+            {/* --- RIGHT PANEL: PATTERN + MATERIALS --- */}
             <div className="flex-1 flex flex-col min-w-0 gap-4 min-h-[600px] lg:h-full print:h-auto print:block">
                 
-                {/* --- TOP: VIEWPORT (FIXED FRAME) --- */}
+                {/* --- VIEWPORT --- */}
                 <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative print:shadow-none print:border-none print:overflow-visible print:h-auto">
                     
-                    {/* TOOLBAR */}
                     <div className="border-b border-slate-100 p-4 flex justify-between items-center bg-slate-50 no-print z-10 relative shrink-0">
                          <div className="flex items-center gap-4">
                              <div className="flex gap-1 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
@@ -415,16 +543,9 @@ export const BrickMe: React.FC = () => {
                                  </button>
                              </div>
                              
-                             {/* ZOOM SLIDER IN TOOLBAR */}
                              <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-slate-400">🔍</span>
-                                <button 
-                                    onClick={handleAutoFit}
-                                    className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded text-slate-600"
-                                    title="Auto Fit to Screen"
-                                >
-                                    FIT
-                                </button>
+                                <button onClick={handleAutoFit} className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded text-slate-600">FIT</button>
                                 <input 
                                     type="range"
                                     min="0.1" 
@@ -436,24 +557,25 @@ export const BrickMe: React.FC = () => {
                                 />
                              </div>
                          </div>
-                         <button onClick={() => window.print()} className="flex items-center gap-2 text-slate-600 font-bold text-sm hover:text-indigo-600 hover:bg-indigo-50 px-4 py-2 rounded-lg transition-colors">
-                             <span>🖨️</span> Print PDF
+                         <button 
+                            onClick={handleExportPDF} 
+                            disabled={!pattern || isExporting}
+                            className="flex items-center gap-2 text-slate-600 font-bold text-sm hover:text-indigo-600 hover:bg-indigo-50 px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                         >
+                             <span>{isExporting ? '⏳' : '📥'}</span> 
+                             {isExporting ? 'Generating...' : 'Export PDF'}
                          </button>
                     </div>
 
-                    {/* SCROLLABLE CONTENT AREA - CRITICAL FIX */}
                     <div ref={viewportRef} className="flex-1 relative overflow-auto bg-slate-50/50 print:overflow-visible print:bg-white print:h-auto">
-                        {/* THE WRAPPER: Ensures content expands down/right correctly so scrolling works */}
                         <div className="min-w-full min-h-full flex items-center justify-center p-8 print:p-0 print:block">
                             {pattern ? (
                                 <div 
                                     className="bg-white shadow-xl rounded-xl p-1 border border-slate-200 print:shadow-none print:border-none origin-center transition-transform duration-100 ease-out print:w-full print:h-auto"
                                     style={{
                                         display: 'grid',
-                                        // FORCE FIXED PIXEL SIZE PER CELL AND ROW
                                         gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
-                                        gridTemplateRows: `repeat(${pattern.height}, ${cellSize}px)`, // ADDED THIS to fix uneven spacing
-                                        // FORCE TOTAL SIZE to be SQUARE based on pattern size
+                                        gridTemplateRows: `repeat(${pattern.height}, ${cellSize}px)`,
                                         width: `${pattern.width * cellSize}px`,
                                         height: `${pattern.height * cellSize}px`
                                     }}
@@ -462,22 +584,21 @@ export const BrickMe: React.FC = () => {
                                         <div 
                                             key={i}
                                             style={{ 
-                                                width: `${cellSize}px`,
-                                                height: `${cellSize}px`,
+                                                aspectRatio: '1/1',
                                                 backgroundColor: viewMode === 'visual' ? p.color.hex : `${p.color.hex}33`, 
                                                 gridColumn: p.x + 1,
-                                                gridRow: p.y + 1,
+                                                gridRow: p.y + 1
                                             }}
-                                            className={`relative border-[0.5px] border-slate-100 flex items-center justify-center ${viewMode === 'visual' ? 'rounded-full scale-90 shadow-sm' : ''}`}
+                                            // ROUNDED-FULL for bead shape
+                                            className="w-full h-full rounded-full border-[0.5px] border-black/10 flex items-center justify-center text-[10px] text-slate-500 font-bold print:border-slate-300 relative shadow-inner"
                                         >
+                                            {/* Bead Hole Simulation */}
                                             {viewMode === 'visual' && (
-                                                <div className="w-[30%] h-[30%] bg-slate-900/10 rounded-full shadow-inner pointer-events-none" />
+                                                <div className="w-[25%] h-[25%] bg-white/40 rounded-full"></div>
                                             )}
+
                                             {viewMode === 'chart' && (
-                                                <span 
-                                                    className="font-bold text-slate-700 leading-none select-none"
-                                                    style={{ fontSize: `${cellSize * 0.6}px` }}
-                                                >
+                                                <span style={{ fontSize: Math.max(8, cellSize * 0.6) }} className="text-slate-800 z-10">
                                                     {p.color.symbol}
                                                 </span>
                                             )}
@@ -485,92 +606,78 @@ export const BrickMe: React.FC = () => {
                                     ))}
                                 </div>
                             ) : (
-                                <div className="text-center text-slate-300">
-                                     <div className="text-6xl mb-4">🧱</div>
-                                     <p className="font-bold text-lg">Pattern View</p>
+                                <div className="text-center text-slate-400">
+                                    <div className="text-6xl mb-4 opacity-20">🎨</div>
+                                    <p>Upload an image to start</p>
                                 </div>
                             )}
                         </div>
                     </div>
                 </div>
 
-                {/* --- BOTTOM: MATERIALS (HORIZONTAL) --- */}
-                 {pattern && (
-                     <div className="h-48 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 overflow-hidden flex flex-col no-print shrink-0 print:h-auto print:overflow-visible">
-                        <div className="flex justify-between items-center mb-2 shrink-0">
-                            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Materials</h3>
-                            <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 font-bold">
-                                {pattern.pixels.length} beads
-                            </span>
+                {/* --- BOTTOM: MATERIALS --- */}
+                {pattern && (
+                    <div className="h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col shrink-0 no-print">
+                        <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-center">
+                             <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">Material List</h3>
+                             <span className="text-xs font-bold text-slate-400">{pattern.pixels.length} Beads Total</span>
                         </div>
-                        
-                        <div className="flex-1 overflow-y-auto pr-2 print:overflow-visible print:h-auto">
-                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                        <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
+                             <div className="flex flex-wrap gap-3">
                                 {Object.entries(pattern.counts)
-                                    .sort(([, a], [, b]) => b - a)
+                                    .sort(([,a], [,b]) => b - a)
                                     .map(([colorId, count]) => {
                                         const color = BEAD_COLORS.find(c => c.id === colorId);
                                         if (!color) return null;
                                         return (
-                                            <div key={colorId} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 print:border-slate-300">
+                                            <div key={colorId} className="flex items-center gap-3 bg-slate-50 pr-4 rounded-full border border-slate-100 hover:border-slate-300 transition-colors">
                                                 <div 
-                                                    className="w-6 h-6 rounded-full shadow-sm border border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-700 shrink-0 print:border-slate-900"
-                                                    style={{ backgroundColor: color.hex }}
+                                                    className="w-8 h-8 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                                                    style={{ backgroundColor: color.hex, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
                                                 >
-                                                    {viewMode === 'chart' ? color.symbol : ''}
+                                                    {color.symbol}
                                                 </div>
-                                                <div className="min-w-0">
-                                                    <div className="font-bold text-slate-700 text-xs truncate">{color.name}</div>
-                                                    <div className="text-[10px] text-slate-400 font-mono">x{count}</div>
+                                                <div className="flex flex-col py-1">
+                                                    <span className="text-xs font-bold text-slate-700">{color.name}</span>
+                                                    <span className="text-[10px] text-slate-400 font-bold">x{count}</span>
                                                 </div>
                                             </div>
-                                        )
+                                        );
                                     })
                                 }
-                            </div>
+                             </div>
                         </div>
-                     </div>
-                 )}
+                    </div>
+                )}
             </div>
 
-            {/* --- EDIT MODAL --- */}
+            {/* --- REFINE MODAL --- */}
             {showRefineModal && (
-                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
-                        <h3 className="text-xl font-black text-slate-800 mb-2">Refine with AI</h3>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-float">
+                        <h3 className="text-xl font-black text-slate-800 mb-2">Refine Result</h3>
                         <p className="text-slate-500 text-sm mb-4">
-                            Describe what needs to be fixed. <br/>
-                            <span className="text-xs italic opacity-70">"Make the guitar border white", "Make hair brighter"</span>
+                            Describe what you want to change (e.g., "Make the hair lighter", "Fix the left eye").
                         </p>
-                        
                         <textarea 
                             value={refinePrompt}
                             onChange={(e) => setRefinePrompt(e.target.value)}
-                            placeholder="What should we change?"
-                            className="w-full border-2 border-slate-200 rounded-xl p-3 text-slate-700 focus:border-indigo-500 outline-none h-24 mb-4 resize-none"
-                            autoFocus
+                            className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm focus:border-indigo-500 outline-none min-h-[100px]"
+                            placeholder="Type your instruction..."
                         />
-                        
-                        <div className="flex gap-3">
+                        <div className="flex gap-3 mt-6">
                             <button 
                                 onClick={() => setShowRefineModal(false)}
-                                disabled={isRefining}
-                                className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors"
+                                className="flex-1 py-2 font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
                             >
                                 Cancel
                             </button>
                             <button 
                                 onClick={handleRefine}
-                                disabled={isRefining || !refinePrompt.trim()}
-                                className="flex-1 py-3 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+                                disabled={!refinePrompt.trim() || isRefining}
+                                className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors disabled:opacity-50"
                             >
-                                {isRefining ? (
-                                    <>
-                                        <span className="animate-spin">🔄</span> Refining...
-                                    </>
-                                ) : (
-                                    <>✨ Generate</>
-                                )}
+                                {isRefining ? 'Refining...' : 'Apply Changes'}
                             </button>
                         </div>
                     </div>
