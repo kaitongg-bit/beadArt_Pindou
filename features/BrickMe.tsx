@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { generateCartoonAvatar, refinePixelArt } from '../services/gemini';
 import { BEAD_COLORS, BOARD_SIZES } from '../constants';
@@ -27,6 +26,43 @@ const getNearestBeadColor = (r: number, g: number, b: number) => {
     return nearest;
 };
 
+// Forces any image into a square canvas with GENEROUS white padding
+// This prevents the AI from generating "full bleed" images that get cut off
+const padImageToSquare = (base64Str: string): Promise<string> => {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.src = base64Str;
+        img.onload = () => {
+            const maxDim = Math.max(img.width, img.height);
+            // ADD 30% PADDING total (15% per side) to the source canvas
+            // This is the "Nuclear Option" to ensure heads/feet are NEVER cut off
+            const padding = maxDim * 0.30; 
+            const canvasSize = maxDim + (padding * 2);
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = canvasSize;
+            canvas.height = canvasSize;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                resolve(base64Str);
+                return;
+            }
+
+            // Fill white background
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvasSize, canvasSize);
+
+            // Draw centered
+            const x = (canvasSize - img.width) / 2;
+            const y = (canvasSize - img.height) / 2;
+            ctx.drawImage(img, x, y);
+
+            resolve(canvas.toDataURL('image/jpeg', 0.95));
+        };
+        img.onerror = () => resolve(base64Str);
+    });
+};
+
 // --- COMPONENT ---
 
 export const BrickMe: React.FC = () => {
@@ -51,6 +87,29 @@ export const BrickMe: React.FC = () => {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const viewportRef = useRef<HTMLDivElement>(null);
+
+    const BASE_CELL_SIZE = 20;
+
+    // Auto Fit Logic
+    const handleAutoFit = () => {
+        if (!pattern || !viewportRef.current) return;
+        const { clientWidth, clientHeight } = viewportRef.current;
+        const padding = 40; // px buffer
+        const availableW = clientWidth - padding;
+        const availableH = clientHeight - padding;
+        
+        const contentW = pattern.width * BASE_CELL_SIZE;
+        const contentH = pattern.height * BASE_CELL_SIZE;
+
+        const scaleW = availableW / contentW;
+        const scaleH = availableH / contentH;
+        
+        // Fit to smallest dimension, capped at 1.0 (don't zoom in too much automatically)
+        // But allow zooming OUT as much as needed (e.g. 0.2)
+        const newZoom = Math.min(scaleW, scaleH, 1.0);
+        setZoomLevel(Math.max(0.1, newZoom));
+    };
 
     // 1. Handle Upload & AI Stylization
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,16 +119,22 @@ export const BrickMe: React.FC = () => {
         setIsProcessing(true);
         setCartoonImage(null);
         setPattern(null);
-        setStepStatus('Generating BrickHeadz style pixel art...');
+        setStepStatus('Preparing image...');
 
         const reader = new FileReader();
         reader.onload = async (event) => {
-            const base64 = event.target?.result as string;
-            setOriginalImage(base64);
+            const rawBase64 = event.target?.result as string;
+            
+            // STEP 1: FORCE SQUARE ASPECT RATIO WITH PADDING
+            // This ensures the AI gets a square canvas with whitespace
+            const squareBase64 = await padImageToSquare(rawBase64);
+            
+            setOriginalImage(squareBase64);
+            setStepStatus('Generating BrickHeadz style pixel art...');
 
             try {
                 // Call Gemini to "clean up" the image for pixelation
-                const aiResult = await generateCartoonAvatar(base64);
+                const aiResult = await generateCartoonAvatar(squareBase64);
                 if (aiResult) {
                     setCartoonImage(aiResult);
                     setStepStatus('Quantizing colors to bead palette...');
@@ -77,12 +142,12 @@ export const BrickMe: React.FC = () => {
                     setTimeout(() => processBeadPattern(aiResult, boardSize), 100);
                 } else {
                     setStepStatus('AI failed, using original image...');
-                    setTimeout(() => processBeadPattern(base64, boardSize), 100);
+                    setTimeout(() => processBeadPattern(squareBase64, boardSize), 100);
                 }
             } catch (error) {
                 console.error(error);
                 setStepStatus('Error. Using original image.');
-                processBeadPattern(base64, boardSize);
+                processBeadPattern(squareBase64, boardSize);
             } finally {
                 setIsProcessing(false);
             }
@@ -138,15 +203,19 @@ export const BrickMe: React.FC = () => {
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, size, size);
 
-            // LOGIC CHANGE: "CONTAIN" instead of "COVER"
-            // This ensures the entire figure (feet/head) fits in the square
-            const scale = size / Math.max(img.width, img.height);
-            const drawWidth = img.width * scale;
-            const drawHeight = img.height * scale;
+            // LOGIC CHANGE: AGGRESSIVE SAFETY MARGIN PADDING
+            // Scale to 90% of the grid to ensure edge beads are empty
+            const PADDING_FACTOR = 0.90; 
             
-            // Center the image
-            const dx = (size - drawWidth) / 2;
-            const dy = (size - drawHeight) / 2;
+            // "CONTAIN" logic with Padding
+            // Use Math.floor to ensure integer coordinates
+            const scale = (size * PADDING_FACTOR) / Math.max(img.width, img.height);
+            const drawWidth = Math.floor(img.width * scale);
+            const drawHeight = Math.floor(img.height * scale);
+            
+            // Center the image strictly
+            const dx = Math.floor((size - drawWidth) / 2);
+            const dy = Math.floor((size - drawHeight) / 2);
 
             ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, drawWidth, drawHeight);
             
@@ -172,8 +241,8 @@ export const BrickMe: React.FC = () => {
 
                     // 2. Ignore WHITE Background pixels
                     // Strict threshold to catch the white background requested
-                    // Lowered slightly to 240 to catch compression artifacts
-                    if (r > 240 && g > 240 && b > 240) continue;
+                    // Using 250 to avoid cutting off light hair
+                    if (r > 250 && g > 250 && b > 250) continue;
 
                     const matchedColor = getNearestBeadColor(r, g, b);
                     
@@ -187,6 +256,9 @@ export const BrickMe: React.FC = () => {
             setPattern({ width: size, height: size, pixels: newPixels, counts });
             setIsProcessing(false);
             setStepStatus('');
+            
+            // Auto fit after processing
+            setTimeout(handleAutoFit, 100);
         };
     };
 
@@ -202,7 +274,6 @@ export const BrickMe: React.FC = () => {
 
 
     // Calculate cell size based on zoom
-    const BASE_CELL_SIZE = 20; // 20px base size
     const cellSize = BASE_CELL_SIZE * zoomLevel;
 
     return (
@@ -222,7 +293,7 @@ export const BrickMe: React.FC = () => {
                          {cartoonImage ? (
                              <img src={cartoonImage} className="w-full h-full object-contain bg-slate-50 p-2" alt="AI Optimized" />
                          ) : originalImage ? (
-                             <img src={originalImage} className="w-full h-full object-cover opacity-50 grayscale" alt="Original" />
+                             <img src={originalImage} className="w-full h-full object-contain bg-slate-50 p-2" alt="Original" />
                          ) : (
                              <div className="text-center p-4">
                                  <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">📸</div>
@@ -347,9 +418,16 @@ export const BrickMe: React.FC = () => {
                              {/* ZOOM SLIDER IN TOOLBAR */}
                              <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-slate-400">🔍</span>
+                                <button 
+                                    onClick={handleAutoFit}
+                                    className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded text-slate-600"
+                                    title="Auto Fit to Screen"
+                                >
+                                    FIT
+                                </button>
                                 <input 
                                     type="range"
-                                    min="0.5" 
+                                    min="0.1" 
                                     max="3.0"
                                     step="0.1"
                                     value={zoomLevel}
@@ -364,12 +442,12 @@ export const BrickMe: React.FC = () => {
                     </div>
 
                     {/* SCROLLABLE CONTENT AREA */}
-                    <div className="flex-1 relative overflow-hidden bg-slate-50/50">
+                    <div ref={viewportRef} className="flex-1 relative overflow-hidden bg-slate-50/50">
                         {/* The absolute container allows scrolling ONLY inside this frame */}
                         <div className="absolute inset-0 overflow-auto flex items-center justify-center p-8 print:p-0 print:static print:overflow-visible">
                             {pattern ? (
                                 <div 
-                                    className="bg-white shadow-xl rounded-xl p-1 border border-slate-200 print:shadow-none print:border-none"
+                                    className="bg-white shadow-xl rounded-xl p-1 border border-slate-200 print:shadow-none print:border-none origin-center transition-transform duration-100 ease-out"
                                     style={{
                                         display: 'grid',
                                         // FORCE FIXED PIXEL SIZE PER CELL
