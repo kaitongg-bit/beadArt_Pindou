@@ -204,8 +204,8 @@ export const BrickMe: React.FC = () => {
             ctx.fillRect(0, 0, size, size);
 
             // LOGIC CHANGE: AGGRESSIVE SAFETY MARGIN PADDING
-            // Scale to 90% of the grid to ensure edge beads are empty
-            const PADDING_FACTOR = 0.90; 
+            // Scale to 85% (was 90%) of the grid to ensure edge beads are empty
+            const PADDING_FACTOR = 0.85; 
             
             // "CONTAIN" logic with Padding
             // Use Math.floor to ensure integer coordinates
@@ -278,7 +278,7 @@ export const BrickMe: React.FC = () => {
 
     return (
         // CRITICAL FIX: height is auto on mobile (scrollable), full on desktop (fixed app)
-        <div className="flex flex-col lg:flex-row gap-6 relative h-auto lg:h-full">
+        <div className="flex flex-col lg:flex-row gap-6 relative h-auto lg:h-full print:h-auto print:block">
             <canvas ref={canvasRef} className="hidden" />
 
             {/* --- LEFT PANEL: INPUT --- */}
@@ -392,10 +392,10 @@ export const BrickMe: React.FC = () => {
 
             {/* --- RIGHT PANEL: PATTERN + MATERIALS (Vertical Flex) --- */}
             {/* Height fix: min-h defined so it doesn't collapse on mobile. full height on desktop */}
-            <div className="flex-1 flex flex-col min-w-0 gap-4 min-h-[600px] lg:h-full">
+            <div className="flex-1 flex flex-col min-w-0 gap-4 min-h-[600px] lg:h-full print:h-auto print:block">
                 
                 {/* --- TOP: VIEWPORT (FIXED FRAME) --- */}
-                <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative">
+                <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative print:shadow-none print:border-none print:overflow-visible print:h-auto">
                     
                     {/* TOOLBAR */}
                     <div className="border-b border-slate-100 p-4 flex justify-between items-center bg-slate-50 no-print z-10 relative shrink-0">
@@ -441,17 +441,18 @@ export const BrickMe: React.FC = () => {
                          </button>
                     </div>
 
-                    {/* SCROLLABLE CONTENT AREA */}
-                    <div ref={viewportRef} className="flex-1 relative overflow-hidden bg-slate-50/50">
-                        {/* The absolute container allows scrolling ONLY inside this frame */}
-                        <div className="absolute inset-0 overflow-auto flex items-center justify-center p-8 print:p-0 print:static print:overflow-visible">
+                    {/* SCROLLABLE CONTENT AREA - CRITICAL FIX */}
+                    <div ref={viewportRef} className="flex-1 relative overflow-auto bg-slate-50/50 print:overflow-visible print:bg-white print:h-auto">
+                        {/* THE WRAPPER: Ensures content expands down/right correctly so scrolling works */}
+                        <div className="min-w-full min-h-full flex items-center justify-center p-8 print:p-0 print:block">
                             {pattern ? (
                                 <div 
-                                    className="bg-white shadow-xl rounded-xl p-1 border border-slate-200 print:shadow-none print:border-none origin-center transition-transform duration-100 ease-out"
+                                    className="bg-white shadow-xl rounded-xl p-1 border border-slate-200 print:shadow-none print:border-none origin-center transition-transform duration-100 ease-out print:w-full print:h-auto"
                                     style={{
                                         display: 'grid',
-                                        // FORCE FIXED PIXEL SIZE PER CELL
+                                        // FORCE FIXED PIXEL SIZE PER CELL AND ROW
                                         gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
+                                        gridTemplateRows: `repeat(${pattern.height}, ${cellSize}px)`, // ADDED THIS to fix uneven spacing
                                         // FORCE TOTAL SIZE to be SQUARE based on pattern size
                                         width: `${pattern.width * cellSize}px`,
                                         height: `${pattern.height * cellSize}px`
@@ -495,7 +496,7 @@ export const BrickMe: React.FC = () => {
 
                 {/* --- BOTTOM: MATERIALS (HORIZONTAL) --- */}
                  {pattern && (
-                     <div className="h-48 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 overflow-hidden flex flex-col no-print shrink-0">
+                     <div className="h-48 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 overflow-hidden flex flex-col no-print shrink-0 print:h-auto print:overflow-visible">
                         <div className="flex justify-between items-center mb-2 shrink-0">
                             <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Materials</h3>
                             <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 font-bold">
@@ -503,7 +504,7 @@ export const BrickMe: React.FC = () => {
                             </span>
                         </div>
                         
-                        <div className="flex-1 overflow-y-auto pr-2">
+                        <div className="flex-1 overflow-y-auto pr-2 print:overflow-visible print:h-auto">
                              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
                                 {Object.entries(pattern.counts)
                                     .sort(([, a], [, b]) => b - a)
@@ -511,9 +512,9 @@ export const BrickMe: React.FC = () => {
                                         const color = BEAD_COLORS.find(c => c.id === colorId);
                                         if (!color) return null;
                                         return (
-                                            <div key={colorId} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                            <div key={colorId} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 print:border-slate-300">
                                                 <div 
-                                                    className="w-6 h-6 rounded-full shadow-sm border border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-700 shrink-0"
+                                                    className="w-6 h-6 rounded-full shadow-sm border border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-700 shrink-0 print:border-slate-900"
                                                     style={{ backgroundColor: color.hex }}
                                                 >
                                                     {viewMode === 'chart' ? color.symbol : ''}

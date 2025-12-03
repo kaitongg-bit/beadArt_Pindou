@@ -103,18 +103,19 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className="h-screen bg-[#FDFDFD] flex flex-col overflow-hidden">
+    <div className="h-screen bg-[#FDFDFD] flex flex-col overflow-hidden print:h-auto print:overflow-visible">
       <Header />
       
       {/* 
           CRITICAL FIX: 
           On mobile, main is auto/scroll so content pushes down.
           On desktop (lg), main is hidden/flex so we can use inner scrollable areas.
+          On PRINT, height is auto and overflow visible.
       */}
-      <main className="flex-1 overflow-y-auto lg:overflow-hidden">
+      <main className="flex-1 overflow-y-auto lg:overflow-hidden print:overflow-visible print:h-auto">
         {view === ViewMode.LANDING && <Landing />}
         
-        <div className={`h-full max-w-7xl mx-auto p-4 md:p-6 ${view === ViewMode.LANDING ? 'hidden' : 'block'}`}>
+        <div className={`h-full max-w-7xl mx-auto p-4 md:p-6 ${view === ViewMode.LANDING ? 'hidden' : 'block'} print:h-auto`}>
             {view === ViewMode.BEADME && <BrickMe />}
             {view === ViewMode.GALLERY && (
                 <div className="text-center mt-20">
