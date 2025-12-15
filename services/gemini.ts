@@ -10,7 +10,9 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-export const generateCartoonAvatar = async (base64Image: string): Promise<string | null> => {
+export type ArtStyle = 'chibi' | 'icon';
+
+export const generateCartoonAvatar = async (base64Image: string, style: ArtStyle = 'chibi'): Promise<string | null> => {
     const ai = getClient();
     if (!ai) return null;
 
@@ -22,19 +24,42 @@ export const generateCartoonAvatar = async (base64Image: string): Promise<string
             }
         };
 
-        // UPDATED PROMPT: STRICT SQUARE ASPECT RATIO
+        let stylePrompt = "";
+        if (style === 'chibi') {
+            stylePrompt = `
+            - TRANSFORM the subject into a CUTE CHIBI / BRICKHEADZ character.
+            - Big square head, cute small body.
+            - If it's a person, make them cute. If it's an animal, make it cute.
+            `;
+        } else {
+            stylePrompt = `
+            - PRESERVE THE ORIGINAL SHAPE strictly. DO NOT turn it into a person/face.
+            - If it is a Bag, Shoe, Car, or Object: Draw it exactly as is, but in a flat 2D vector icon style.
+            - High fidelity to the original outline.
+            `;
+        }
+
         const prompt = `
-        Redraw this person as a 2D PIXEL ART character in the exact style of a LEGO BRICKHEADZ figure.
+        Analyze the image. Identify the MAIN SUBJECT.
+        Redraw this subject as a 2D PIXEL ART illustration suitable for a Perler Bead pattern.
+
+        STYLE MODE: ${style.toUpperCase()}
+        ${stylePrompt}
 
         STRICT VISUAL RULES:
-        1. CANVAS SHAPE: Image MUST be a PERFECT 1:1 SQUARE (e.g. 1024x1024).
-        2. ASPECT RATIO HANDLING: If the character is tall (like a standing person), ADD WHITE PADDING on the left and right. DO NOT STRETCH the character to make them wide. DO NOT CROP the head or feet.
-        3. COMPOSITION: The character must be fully visible from head to toe within the square.
-        4. HEAD SHAPE: Large, perfect SQUARE/CUBE shape with slightly rounded corners (BrickHeadz style).
-        5. EYES: Two distinct black circular dots, widely spaced.
-        6. VIEW ANGLE: Direct FRONT view (flat 2D).
-        7. STYLE: Pixel art. Clean lines. Flat vibrant colors. No gradients.
-        8. BACKGROUND: PURE SOLID WHITE (#FFFFFF) ONLY. No scenery.
+        1. COLORING: 
+           - FLAT COLORS ONLY. 
+           - ABSOLUTELY NO SHADING. NO SHADOWS. NO GRADIENTS. 
+           - Use a limited palette of vibrant, solid colors.
+           - Different parts must be separated by color contrast or black outlines.
+
+        2. CANVAS: 
+           - Image MUST be a PERFECT 1:1 SQUARE.
+           - The subject must be CENTERED with GENEROUS WHITE PADDING (at least 20% margin).
+           - DO NOT CROP parts of the subject.
+
+        3. BACKGROUND: 
+           - PURE SOLID WHITE (#FFFFFF) ONLY. No scenery, no floor shadows.
         
         Output only the image.
         `;
@@ -64,20 +89,21 @@ export const refinePixelArt = async (base64Image: string, instruction: string): 
         const imagePart = {
             inlineData: {
                 data: base64Image.split(',')[1],
-                mimeType: 'image/png' // Assuming previous output is PNG
+                mimeType: 'image/png'
             }
         };
 
         const prompt = `
-        Edit this pixel art character based on the user's instruction.
+        Edit this pixel art image based on the user's instruction.
         
         USER INSTRUCTION: "${instruction}"
 
         STRICT RULES:
-        1. OUTPUT MUST BE A 1:1 SQUARE. Maintain the padding if necessary.
-        2. MAINTAIN the current Lego BrickHeadz pixel art style exactly.
-        3. ONLY change the specific details mentioned in the instruction.
-        4. Output the result on a PURE WHITE background.
+        1. OUTPUT MUST BE A 1:1 SQUARE. Maintain the white padding.
+        2. STYLE: Flat 2D Pixel Art.
+        3. COLORING: FLAT COLORS ONLY. NO SHADOWS. NO GRADIENTS.
+        4. BACKGROUND: MUST BE PURE SOLID WHITE (#FFFFFF). Do not add any gray or off-white background.
+        5. ONLY change the specific details mentioned in the instruction. Keep the rest identical.
         `;
 
         const response = await ai.models.generateContent({
