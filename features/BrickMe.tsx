@@ -8,8 +8,9 @@ import { jsPDF } from "jspdf";
 // --- UTILS ---
 const getNearestBeadColor = (r: number, g: number, b: number) => {
     // 1. Dark Threshold (Black Crush) - prevent dark hair turning green
+    // Using H7 (Pure Black 1,1,1) as the default black
     if (r < 40 && g < 40 && b < 40) {
-        return BEAD_COLORS.find(c => c.id === 'P14') || BEAD_COLORS[0];
+        return BEAD_COLORS.find(c => c.id === 'H7') || BEAD_COLORS.find(c => c.id === 'H6') || BEAD_COLORS[0];
     }
 
     let minDiff = Infinity;
@@ -411,7 +412,8 @@ export const BrickMe: React.FC = () => {
                 const brightness = (r * 299 + g * 587 + b * 114) / 1000;
                 
                 ctx.fillStyle = brightness > 125 ? '#000000' : '#FFFFFF';
-                ctx.font = 'bold 12px sans-serif';
+                // Smaller font for longer IDs
+                ctx.font = 'bold 10px sans-serif'; 
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(p.color.symbol, cx, cy);
@@ -447,7 +449,7 @@ export const BrickMe: React.FC = () => {
                 ctx.stroke();
 
                 ctx.fillStyle = '#000';
-                ctx.font = 'bold 14px sans-serif';
+                ctx.font = 'bold 12px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.fillText(color.symbol, xPos + 10, yPos - 10 + 4);
 
@@ -693,7 +695,7 @@ export const BrickMe: React.FC = () => {
                                             )}
 
                                             {viewMode === 'chart' && (
-                                                <span style={{ fontSize: Math.max(8, cellSize * 0.6) }} className="text-slate-800 z-10">
+                                                <span style={{ fontSize: Math.max(6, cellSize * 0.4) }} className="text-slate-800 z-10">
                                                     {p.color.symbol}
                                                 </span>
                                             )}
