@@ -5,39 +5,77 @@ import { BEAD_COLORS, BOARD_SIZES } from '../constants';
 import { BeadPattern, BeadPixel, BeadColor } from '../types';
 import { jsPDF } from "jspdf";
 
-// --- UTILS ---
+// --- COLOR MATH UTILS (CIELAB) ---
+
+interface LabColor {
+    l: number;
+    a: number;
+    b: number;
+}
+
+const rgbToLab = (r: number, g: number, b: number): LabColor => {
+    let R = r / 255;
+    let G = g / 255;
+    let B = b / 255;
+
+    // Convert to linear RGB
+    R = (R > 0.04045) ? Math.pow((R + 0.055) / 1.055, 2.4) : R / 12.92;
+    G = (G > 0.04045) ? Math.pow((G + 0.055) / 1.055, 2.4) : G / 12.92;
+    B = (B > 0.04045) ? Math.pow((B + 0.055) / 1.055, 2.4) : B / 12.92;
+
+    // Convert to XYZ
+    let X = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047;
+    let Y = (R * 0.2126 + G * 0.7152 + B * 0.0722) / 1.00000;
+    let Z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
+
+    // Convert to Lab
+    X = (X > 0.008856) ? Math.pow(X, 1/3) : (7.787 * X) + 16/116;
+    Y = (Y > 0.008856) ? Math.pow(Y, 1/3) : (7.787 * Y) + 16/116;
+    Z = (Z > 0.008856) ? Math.pow(Z, 1/3) : (7.787 * Z) + 16/116;
+
+    return {
+        l: (116 * Y) - 16,
+        a: 500 * (X - Y),
+        b: 200 * (Y - Z)
+    };
+};
+
+// Pre-calculate Lab values for the entire palette to optimize performance
+const BEAD_LABS = BEAD_COLORS.map(color => {
+    const r = parseInt(color.hex.substring(1, 3), 16);
+    const g = parseInt(color.hex.substring(3, 5), 16);
+    const b = parseInt(color.hex.substring(5, 7), 16);
+    return {
+        ...color,
+        lab: rgbToLab(r, g, b)
+    };
+});
+
 const getNearestBeadColor = (r: number, g: number, b: number) => {
-    // 1. Dark Threshold (Black Crush) - prevent dark hair turning green
-    // Using H7 (Pure Black 1,1,1) as the default black
-    if (r < 40 && g < 40 && b < 40) {
+    // 1. Dark Threshold - Keep absolute blacks strictly black
+    // If very dark, force to Black (H7) or Black Grey (H6) to avoid dark greens/browns
+    if (r < 30 && g < 30 && b < 30) {
         return BEAD_COLORS.find(c => c.id === 'H7') || BEAD_COLORS.find(c => c.id === 'H6') || BEAD_COLORS[0];
     }
 
-    let minDiff = Infinity;
+    const targetLab = rgbToLab(r, g, b);
+    let minDeltaE = Infinity;
     let nearest = BEAD_COLORS[0];
 
-    BEAD_COLORS.forEach(color => {
-        const cr = parseInt(color.hex.substring(1, 3), 16);
-        const cg = parseInt(color.hex.substring(3, 5), 16);
-        const cb = parseInt(color.hex.substring(5, 7), 16);
+    for (const bead of BEAD_LABS) {
+        // Delta E 76 (Euclidean distance in Lab space)
+        // This corresponds much better to human eye perception than RGB distance
+        const dL = targetLab.l - bead.lab.l;
+        const da = targetLab.a - bead.lab.a;
+        const db = targetLab.b - bead.lab.b;
         
-        // 2. Weighted Distance (Redmean Approximation)
-        const rmean = (r + cr) / 2;
-        const dr = r - cr;
-        const dg = g - cg;
-        const db = b - cb;
-        
-        const diff = Math.sqrt(
-            (((512 + rmean) * dr * dr) >> 8) + 
-            4 * dg * dg + 
-            (((767 - rmean) * db * db) >> 8)
-        );
+        const deltaE = (dL * dL) + (da * da) + (db * db);
 
-        if (diff < minDiff) {
-            minDiff = diff;
-            nearest = color;
+        if (deltaE < minDeltaE) {
+            minDeltaE = deltaE;
+            nearest = bead;
         }
-    });
+    }
     return nearest;
 };
 
@@ -298,33 +336,35 @@ export const BrickMe: React.FC = () => {
                     rawPixels = rawPixels.map(p => {
                         // If this pixel's color is "Minor" (rare)
                         if (tempCounts[p.color.id] <= threshold) {
-                            // Find nearest MAJOR color
+                            // Find nearest MAJOR color in LAB SPACE
                             let bestMajor = p.color;
                             let minMajorDiff = Infinity;
                             
-                            // Get RGB of current pixel's bead color
+                            // Re-calculating Lab for current pixel color (optimization: could be looked up if stored)
                             const cr = parseInt(p.color.hex.substring(1, 3), 16);
                             const cg = parseInt(p.color.hex.substring(3, 5), 16);
                             const cb = parseInt(p.color.hex.substring(5, 7), 16);
+                            const cLab = rgbToLab(cr, cg, cb);
 
                             majorColors.forEach(majorId => {
-                                const majorC = BEAD_COLORS.find(c => c.id === majorId);
-                                if (!majorC) return;
+                                // Find pre-calculated Lab from BEAD_LABS
+                                const majorBead = BEAD_LABS.find(b => b.id === majorId);
+                                if (!majorBead) return;
                                 
-                                const mr = parseInt(majorC.hex.substring(1, 3), 16);
-                                const mg = parseInt(majorC.hex.substring(3, 5), 16);
-                                const mb = parseInt(majorC.hex.substring(5, 7), 16);
+                                // Lab Distance
+                                const dL = cLab.l - majorBead.lab.l;
+                                const da = cLab.a - majorBead.lab.a;
+                                const db = cLab.b - majorBead.lab.b;
+                                const dist = (dL*dL) + (da*da) + (db*db);
 
-                                // Simple dist
-                                const d = Math.sqrt(Math.pow(cr - mr, 2) + Math.pow(cg - mg, 2) + Math.pow(cb - mb, 2));
-                                if (d < minMajorDiff) {
-                                    minMajorDiff = d;
-                                    bestMajor = majorC;
+                                if (dist < minMajorDiff) {
+                                    minMajorDiff = dist;
+                                    bestMajor = majorBead; // BEAD_LABS items are compatible with BeadColor
                                 }
                             });
 
-                            // Only swap if it's reasonably close (don't turn a lone red pixel into blue)
-                            if (minMajorDiff < 60) {
+                            // Threshold for consolidation (Delta E squared ~ 100 is visible but close)
+                            if (minMajorDiff < 200) {
                                 return { ...p, color: bestMajor };
                             }
                         }
