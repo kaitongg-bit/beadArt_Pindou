@@ -412,21 +412,34 @@ export const BrickMe: React.FC = () => {
 
         try {
             const pdfCanvas = document.createElement('canvas');
-            const CELL_PX = 30; // High resolution pixels per bead
-            const HEADER_HEIGHT = 100;
-            const LEGEND_ITEM_HEIGHT = 30;
-            const LEGEND_HEADER_HEIGHT = 60;
-            const LEGEND_COL_WIDTH = 250;
+            
+            // --- HIGH RES SCALING LOGIC ---
+            // We want high resolution for print (approx 300dpi target for A4 if possible)
+            // But we must stay within browser canvas limits (often 4096px or 8192px)
+            const MAX_DIM = 4000; // Safe limit for broad compatibility
+            const TARGET_CELL_PX = 60; // Desired pixels per bead for crisp text (was 30)
+            
+            const maxPatternDim = Math.max(pattern.width, pattern.height);
+            // Dynamic resolution: High res for small grids, safe res for huge grids
+            const CELL_PX = Math.max(20, Math.min(TARGET_CELL_PX, Math.floor(MAX_DIM / maxPatternDim)));
+            
+            // Scale layout elements proportional to the bead size (baseline 30px)
+            const SCALE = CELL_PX / 30;
+
+            const HEADER_HEIGHT = 120 * SCALE;
+            const LEGEND_ITEM_HEIGHT = 40 * SCALE;
+            const LEGEND_HEADER_HEIGHT = 80 * SCALE;
+            const LEGEND_COL_WIDTH = 300 * SCALE;
             const ITEMS_PER_COL = 15;
             
             const distinctColors = Object.entries(pattern.counts);
             const numCols = Math.ceil(distinctColors.length / ITEMS_PER_COL);
-            const legendHeight = LEGEND_HEADER_HEIGHT + (Math.min(distinctColors.length, ITEMS_PER_COL) * LEGEND_ITEM_HEIGHT) + 50;
+            const legendHeight = LEGEND_HEADER_HEIGHT + (Math.min(distinctColors.length, ITEMS_PER_COL) * LEGEND_ITEM_HEIGHT) + (50 * SCALE);
 
             const WIDTH = pattern.width * CELL_PX;
             const HEIGHT = (pattern.height * CELL_PX) + HEADER_HEIGHT + legendHeight;
             
-            const MIN_WIDTH = numCols * LEGEND_COL_WIDTH + 40;
+            const MIN_WIDTH = numCols * LEGEND_COL_WIDTH + (40 * SCALE);
             pdfCanvas.width = Math.max(WIDTH, MIN_WIDTH);
             pdfCanvas.height = HEIGHT;
             
@@ -439,9 +452,9 @@ export const BrickMe: React.FC = () => {
 
             // Header
             ctx.fillStyle = '#1e293b';
-            ctx.font = 'bold 60px sans-serif';
+            ctx.font = `bold ${60 * SCALE}px sans-serif`;
             ctx.textAlign = 'center';
-            ctx.fillText("BeadGift Pattern", pdfCanvas.width / 2, 60);
+            ctx.fillText("BeadGift Pattern", pdfCanvas.width / 2, 60 * SCALE);
 
             // Draw Grid
             const gridXOffset = (pdfCanvas.width - (pattern.width * CELL_PX)) / 2;
@@ -455,22 +468,19 @@ export const BrickMe: React.FC = () => {
                 const y = p.y * CELL_PX;
                 const cx = x + CELL_PX / 2;
                 const cy = y + CELL_PX / 2;
-                const radius = (CELL_PX / 2) - 1;
+                const radius = (CELL_PX / 2) - (1 * SCALE);
 
                 ctx.beginPath();
                 ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
                 ctx.fillStyle = p.color.hex;
                 ctx.fill();
 
-                ctx.beginPath();
-                ctx.arc(cx, cy, radius * 0.25, 0, 2 * Math.PI);
-                ctx.fillStyle = '#FFFFFF';
-                ctx.fill();
+                // Removed inner white hole for solid look
                 
                 ctx.beginPath();
                 ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#e2e8f0'; 
-                ctx.lineWidth = 1;
+                ctx.lineWidth = 1 * SCALE;
                 ctx.stroke();
 
                 const r = parseInt(p.color.hex.slice(1,3), 16);
@@ -479,19 +489,21 @@ export const BrickMe: React.FC = () => {
                 const brightness = (r * 299 + g * 587 + b * 114) / 1000;
                 
                 ctx.fillStyle = brightness > 125 ? '#000000' : '#FFFFFF';
-                // Smaller font for longer IDs
-                ctx.font = 'bold 10px sans-serif'; 
+                
+                // Dynamic font size for clarity
+                const fontSize = CELL_PX * 0.35; // approx 35% of bead size
+                ctx.font = `bold ${fontSize}px sans-serif`; 
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(p.color.symbol, cx, cy);
             });
 
             ctx.setTransform(1, 0, 0, 1, 0, 0); 
-            const legendYStart = gridYOffset + (pattern.height * CELL_PX) + 40;
-            ctx.translate(20, legendYStart);
+            const legendYStart = gridYOffset + (pattern.height * CELL_PX) + (40 * SCALE);
+            ctx.translate(20 * SCALE, legendYStart);
             
             ctx.fillStyle = '#0f172a';
-            ctx.font = 'bold 40px sans-serif';
+            ctx.font = `bold ${40 * SCALE}px sans-serif`;
             ctx.textAlign = 'left';
             ctx.fillText("Materials List", 0, 0);
 
@@ -506,26 +518,32 @@ export const BrickMe: React.FC = () => {
                 const row = idx % ITEMS_PER_COL;
                 
                 const xPos = col * LEGEND_COL_WIDTH;
-                const yPos = 40 + (row * LEGEND_ITEM_HEIGHT);
+                const yPos = (40 * SCALE) + (row * LEGEND_ITEM_HEIGHT);
+
+                const beadRadius = 10 * SCALE;
 
                 ctx.fillStyle = color.hex;
                 ctx.beginPath();
-                ctx.arc(xPos + 10, yPos - 10, 10, 0, Math.PI * 2);
+                ctx.arc(xPos + beadRadius, yPos - beadRadius, beadRadius, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1 * SCALE;
                 ctx.stroke();
 
                 ctx.fillStyle = '#000';
-                ctx.font = 'bold 12px sans-serif';
+                ctx.font = `bold ${12 * SCALE}px sans-serif`;
                 ctx.textAlign = 'center';
-                ctx.fillText(color.symbol, xPos + 10, yPos - 10 + 4);
+                // Adjust vertical alignment for symbol inside legend bead
+                ctx.fillText(color.symbol, xPos + beadRadius, yPos - beadRadius + (4 * SCALE));
 
                 ctx.textAlign = 'left';
-                ctx.font = '20px sans-serif';
-                ctx.fillText(`${color.name} (x${count})`, xPos + 30, yPos - 2);
+                ctx.font = `${20 * SCALE}px sans-serif`;
+                ctx.fillText(`${color.name} (x${count})`, xPos + (30 * SCALE), yPos - (2 * SCALE));
             });
 
-            const imgData = pdfCanvas.toDataURL('image/jpeg', 0.85);
+            // Use PNG for lossless text quality
+            const imgData = pdfCanvas.toDataURL('image/png');
+            
             const pdf = new jsPDF({
                 orientation: pdfCanvas.width > pdfCanvas.height ? 'l' : 'p',
                 unit: 'mm',
@@ -542,7 +560,7 @@ export const BrickMe: React.FC = () => {
             const marginX = (pdfWidth - printW) / 2;
             const marginY = (pdfHeight - printH) / 2;
             
-            pdf.addImage(imgData, 'JPEG', marginX, marginY, printW, printH);
+            pdf.addImage(imgData, 'PNG', marginX, marginY, printW, printH);
             pdf.save('bead-pattern.pdf');
 
         } catch (e) {
