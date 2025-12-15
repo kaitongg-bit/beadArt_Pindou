@@ -143,7 +143,8 @@ export const BrickMe: React.FC = () => {
     const [styleMode, setStyleMode] = useState<'chibi' | 'icon' | 'original'>('chibi');
     const [customPrompt, setCustomPrompt] = useState(''); // New: User instruction for AI
     
-    const [boardSize, setBoardSize] = useState<number>(58); // Default to roughly 2 boards
+    // Default to STANDARD board size (52)
+    const [boardSize, setBoardSize] = useState<number>(BOARD_SIZES.STANDARD); 
     const [isGeneratingAI, setIsGeneratingAI] = useState(false);
     const [isPixelating, setIsPixelating] = useState(false);
     const [statusMsg, setStatusMsg] = useState('');
@@ -695,7 +696,7 @@ export const BrickMe: React.FC = () => {
                                 <div>
                                     <div className="flex justify-between items-center mb-2">
                                         <label className="text-xs font-bold text-slate-400 uppercase">Grid Size</label>
-                                        <span className="text-indigo-600 font-mono font-bold text-sm">{boardSize}px ({Math.ceil(boardSize/29)}x{Math.ceil(boardSize/29)} boards)</span>
+                                        <span className="text-indigo-600 font-mono font-bold text-sm">{boardSize}px ({Math.ceil(boardSize/BOARD_SIZES.STANDARD)}x{Math.ceil(boardSize/BOARD_SIZES.STANDARD)} boards)</span>
                                     </div>
                                     <input 
                                         type="range"

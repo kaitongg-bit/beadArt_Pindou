@@ -57,7 +57,7 @@ export const BEAD_COLORS: BeadColor[] = [
   { id: 'B22', name: 'B22', hex: '#0A4241', symbol: 'B22' },
   { id: 'B23', name: 'B23', hex: '#343B1A', symbol: 'B23' },
   { id: 'B24', name: 'B24', hex: '#E8966A', symbol: 'B24' },
-  { id: 'B25', name: 'B25', hex: '#4EDEA9', symbol: 'B25' },
+  { id: 'B25', name: 'B25', hex: '#4950C2', symbol: 'B25' },
   { id: 'B26', name: 'B26', hex: '#907C35', symbol: 'B26' },
   { id: 'B27', name: 'B27', hex: '#D0E0AF', symbol: 'B27' },
   { id: 'B28', name: 'B28', hex: '#9EE5BB', symbol: 'B28' },
@@ -245,9 +245,9 @@ export const BEAD_COLORS: BeadColor[] = [
 ];
 
 export const BOARD_SIZES = {
-  MINI: 15,
-  MIDI: 29, // Standard pegboard
-  MAXI: 58  // 4 boards connected
+  MINI: 26,
+  STANDARD: 52, // User definition: 52x52 per board
+  DOUBLE: 104   // 2x2
 };
 
 export const LEGO_COLORS = [
