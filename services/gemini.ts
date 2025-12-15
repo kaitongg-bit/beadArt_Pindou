@@ -12,56 +12,65 @@ const getClient = () => {
 
 export type ArtStyle = 'chibi' | 'icon';
 
-export const generateCartoonAvatar = async (base64Image: string, style: ArtStyle = 'chibi'): Promise<string | null> => {
+export const generateCartoonAvatar = async (base64Image: string, style: ArtStyle = 'chibi', userInstruction: string = ""): Promise<string | null> => {
     const ai = getClient();
     if (!ai) return null;
 
     try {
+        const mimeType = base64Image.match(/data:([^;]+);base64/)?.[1] || 'image/jpeg';
         const imagePart = {
             inlineData: {
                 data: base64Image.split(',')[1],
-                mimeType: 'image/jpeg'
+                mimeType: mimeType
             }
         };
 
         let stylePrompt = "";
         if (style === 'chibi') {
             stylePrompt = `
-            - TRANSFORM the subject into a CUTE CHIBI / BRICKHEADZ character.
-            - Big square head, cute small body.
-            - If it's a person, make them cute. If it's an animal, make it cute.
+            - STYLE: CUTE CHIBI / BRICKHEADZ.
+            - TRANSFORM the subject into a character with a big square head and small body.
+            - If it's a person or animal, maximize cuteness.
             `;
         } else {
+            // Updated ICON prompt for extreme flatness
             stylePrompt = `
-            - PRESERVE THE ORIGINAL SHAPE strictly. DO NOT turn it into a person/face.
-            - If it is a Bag, Shoe, Car, or Object: Draw it exactly as is, but in a flat 2D vector icon style.
-            - High fidelity to the original outline.
+            - STYLE: EXTREME FLAT VECTOR ICON / CLIP ART / ENAMEL PIN DESIGN.
+            - SUBJECT: Keep the original shape of the object (e.g., Bag, Shoe, Car) exactly.
+            - CRITICAL: REMOVE ALL LIGHTING, SHADOWS, HIGHLIGHTS, AND GRADIENTS.
+            - MATERIAL: Ignore realistic textures (like leather gloss, fabric folds, metal shine). 
+            - COLORING: Use ONE solid color for each area. For example, if a bag is brown leather, make it a single solid flat brown block. Do not simulate the 3D curve of the bag with darker browns.
+            - PATTERNS: If the object has a print (like a logo pattern or monogram), keep the pattern sharp and high-contrast, but make the background behind it solid.
+            - OUTLINE: Use thick, clean lines to define shapes.
             `;
         }
 
         const prompt = `
-        Analyze the image. Identify the MAIN SUBJECT.
-        Redraw this subject as a 2D PIXEL ART illustration suitable for a Perler Bead pattern.
+        Task: Redraw the main subject of this image as a pixel-perfect reference for a Perler Bead project.
 
         STYLE MODE: ${style.toUpperCase()}
         ${stylePrompt}
 
-        STRICT VISUAL RULES:
-        1. COLORING: 
-           - FLAT COLORS ONLY. 
-           - ABSOLUTELY NO SHADING. NO SHADOWS. NO GRADIENTS. 
-           - Use a limited palette of vibrant, solid colors.
-           - Different parts must be separated by color contrast or black outlines.
+        USER SPECIFIC INSTRUCTIONS:
+        "${userInstruction ? userInstruction : "Follow the original image content."}"
+        (IMPORTANT: Apply the user's instructions to the content, but strictly adhere to the VISUAL STYLE defined above.)
 
-        2. CANVAS: 
+        STRICT VISUAL RULES:
+        1. COLOR PALETTE: 
+           - Use a limited palette (max 12-16 distinct colors).
+           - COLORS MUST BE SOLID AND FLAT. 
+           - NO SHADING. NO "AIRBRUSH" LOOK. NO AMBIENT OCCLUSION.
+
+        2. COMPOSITION: 
            - Image MUST be a PERFECT 1:1 SQUARE.
-           - The subject must be CENTERED with GENEROUS WHITE PADDING (at least 20% margin).
-           - DO NOT CROP parts of the subject.
+           - Center the subject with GENEROUS WHITE PADDING (at least 15% margin on all sides).
+           - Do not crop the subject.
 
         3. BACKGROUND: 
-           - PURE SOLID WHITE (#FFFFFF) ONLY. No scenery, no floor shadows.
+           - PURE SOLID WHITE (#FFFFFF) ONLY. 
+           - REMOVE all floor shadows, drop shadows, and background scenery.
         
-        Output only the image.
+        Output only the resulting image.
         `;
 
         const response = await ai.models.generateContent({
@@ -86,24 +95,23 @@ export const refinePixelArt = async (base64Image: string, instruction: string): 
     if (!ai) return null;
 
     try {
+        const mimeType = base64Image.match(/data:([^;]+);base64/)?.[1] || 'image/png';
         const imagePart = {
             inlineData: {
                 data: base64Image.split(',')[1],
-                mimeType: 'image/png'
+                mimeType: mimeType
             }
         };
 
         const prompt = `
-        Edit this pixel art image based on the user's instruction.
+        Edit this image based on the user's instruction.
         
         USER INSTRUCTION: "${instruction}"
 
         STRICT RULES:
-        1. OUTPUT MUST BE A 1:1 SQUARE. Maintain the white padding.
-        2. STYLE: Flat 2D Pixel Art.
-        3. COLORING: FLAT COLORS ONLY. NO SHADOWS. NO GRADIENTS.
-        4. BACKGROUND: MUST BE PURE SOLID WHITE (#FFFFFF). Do not add any gray or off-white background.
-        5. ONLY change the specific details mentioned in the instruction. Keep the rest identical.
+        1. MAINTAIN STYLE: Keep it EXTREMELY FLAT and 2D. Solid colors only. No gradients/shadows.
+        2. OUTPUT: 1:1 Square, White Background (#FFFFFF).
+        3. Only change what is asked.
         `;
 
         const response = await ai.models.generateContent({

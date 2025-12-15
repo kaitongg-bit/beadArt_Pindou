@@ -42,19 +42,30 @@ const getNearestBeadColor = (r: number, g: number, b: number) => {
 };
 
 // Forces any image into a square canvas with GENEROUS white padding
+// AND downscales to max 1024x1024 to prevent API payload errors
 const padImageToSquare = (base64Str: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new Image();
         img.src = base64Str;
         img.onload = () => {
-            const maxDim = Math.max(img.width, img.height);
-            // ADD 30% PADDING total (15% per side) to the source canvas
-            const padding = maxDim * 0.30; 
-            const canvasSize = maxDim + (padding * 2);
+            const originalMax = Math.max(img.width, img.height);
             
+            // Limit max dimension to avoid massive payloads (API Limit / XHR Error fix)
+            const TARGET_MAX = 1024;
+            
+            // Calculate raw padded size (30% padding)
+            let finalSize = originalMax * 1.3;
+            
+            // Calculate scale to fit in target
+            let scale = 1;
+            if (finalSize > TARGET_MAX) {
+                scale = TARGET_MAX / finalSize;
+                finalSize = TARGET_MAX;
+            }
+
             const canvas = document.createElement('canvas');
-            canvas.width = canvasSize;
-            canvas.height = canvasSize;
+            canvas.width = finalSize;
+            canvas.height = finalSize;
             const ctx = canvas.getContext('2d');
             if (!ctx) {
                 resolve(base64Str);
@@ -63,14 +74,21 @@ const padImageToSquare = (base64Str: string): Promise<string> => {
 
             // Fill white background
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(0, 0, canvasSize, canvasSize);
+            ctx.fillRect(0, 0, finalSize, finalSize);
 
             // Draw centered
-            const x = (canvasSize - img.width) / 2;
-            const y = (canvasSize - img.height) / 2;
-            ctx.drawImage(img, x, y);
+            const drawW = img.width * scale;
+            const drawH = img.height * scale;
+            const x = (finalSize - drawW) / 2;
+            const y = (finalSize - drawH) / 2;
+            
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            
+            ctx.drawImage(img, x, y, drawW, drawH);
 
-            resolve(canvas.toDataURL('image/jpeg', 0.95));
+            // Export as JPEG 0.8 to further reduce size
+            resolve(canvas.toDataURL('image/jpeg', 0.8));
         };
         img.onerror = () => resolve(base64Str);
     });
@@ -85,6 +103,8 @@ export const BrickMe: React.FC = () => {
     
     // --- NEW STATES FOR WORKFLOW ---
     const [styleMode, setStyleMode] = useState<'chibi' | 'icon' | 'original'>('chibi');
+    const [customPrompt, setCustomPrompt] = useState(''); // New: User instruction for AI
+    
     const [boardSize, setBoardSize] = useState<number>(58); // Default to roughly 2 boards
     const [isGeneratingAI, setIsGeneratingAI] = useState(false);
     const [isPixelating, setIsPixelating] = useState(false);
@@ -114,6 +134,9 @@ export const BrickMe: React.FC = () => {
         setStatusMsg('Loading...');
         setPattern(null);
         setProcessedImage(null);
+        setCustomPrompt(''); // Reset prompt
+        // Default to chibi when new image uploaded, user can switch to original
+        setStyleMode('chibi'); 
         
         const reader = new FileReader();
         reader.onload = async (event) => {
@@ -129,6 +152,8 @@ export const BrickMe: React.FC = () => {
     // Step 1: Generate AI Image (Optional, if not Original mode)
     const handleGenerateAI = async () => {
         if (!originalImage) return;
+        
+        // If mode is original, we just use the original image (should be handled by selection, but safety check)
         if (styleMode === 'original') {
             setProcessedImage(originalImage);
             return;
@@ -138,7 +163,8 @@ export const BrickMe: React.FC = () => {
         setStatusMsg('Generating AI artwork...');
         try {
             const aiStyle = styleMode === 'chibi' ? 'chibi' : 'icon';
-            const result = await generateCartoonAvatar(originalImage, aiStyle);
+            // PASS CUSTOM PROMPT HERE
+            const result = await generateCartoonAvatar(originalImage, aiStyle, customPrompt);
             if (result) {
                 setProcessedImage(result);
             } else {
@@ -518,70 +544,114 @@ export const BrickMe: React.FC = () => {
                 {/* 2. STYLE & PROCESS */}
                 {originalImage && (
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 animate-fade-in">
-                        <h2 className="text-xl font-black text-slate-800 mb-4">2. Style</h2>
+                        <h2 className="text-xl font-black text-slate-800 mb-4">2. Process Mode</h2>
                         
-                        {/* Style Selector */}
-                        <div className="space-y-3 mb-6">
-                            <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${styleMode === 'chibi' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-200'}`}>
-                                <input type="radio" name="style" checked={styleMode === 'chibi'} onChange={() => { setStyleMode('chibi'); setProcessedImage(null); }} className="w-5 h-5 accent-indigo-600" />
-                                <div>
-                                    <div className="font-bold text-slate-800">Cute Avatar</div>
-                                    <div className="text-xs text-slate-500">AI Chibi style for people/pets</div>
-                                </div>
-                            </label>
+                        {/* STYLE SELECTION: SEPARATE DIRECT VS AI */}
+                        <div className="space-y-6">
+                            
+                            {/* OPTION A: DIRECT PIXELATION */}
+                            <div>
+                                <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${styleMode === 'original' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100 hover:border-slate-200'}`}>
+                                    <input 
+                                        type="radio" 
+                                        name="style" 
+                                        checked={styleMode === 'original'} 
+                                        onChange={() => { 
+                                            setStyleMode('original'); 
+                                            setProcessedImage(originalImage); 
+                                            setCustomPrompt('');
+                                        }} 
+                                        className="w-5 h-5 accent-emerald-600" 
+                                    />
+                                    <div>
+                                        <div className="font-bold text-slate-800">Original Photo</div>
+                                        <div className="text-xs text-slate-500">Pixelate image exactly as is</div>
+                                    </div>
+                                </label>
+                            </div>
 
-                            <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${styleMode === 'icon' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-200'}`}>
-                                <input type="radio" name="style" checked={styleMode === 'icon'} onChange={() => { setStyleMode('icon'); setProcessedImage(null); }} className="w-5 h-5 accent-indigo-600" />
-                                <div>
-                                    <div className="font-bold text-slate-800">HD Icon</div>
-                                    <div className="text-xs text-slate-500">Realistic flat objects (No shadow)</div>
-                                </div>
-                            </label>
+                            {/* OPTION B: AI REMIX */}
+                            <div className="border-t border-slate-100 pt-4">
+                                <h3 className="text-xs font-bold text-slate-400 uppercase mb-3">AI Remix</h3>
+                                <div className="space-y-2">
+                                    <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${styleMode === 'chibi' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-200'}`}>
+                                        <input 
+                                            type="radio" 
+                                            name="style" 
+                                            checked={styleMode === 'chibi'} 
+                                            onChange={() => { setStyleMode('chibi'); setProcessedImage(null); }} 
+                                            className="w-5 h-5 accent-indigo-600" 
+                                        />
+                                        <div>
+                                            <div className="font-bold text-slate-800">Cute Avatar</div>
+                                            <div className="text-xs text-slate-500">Big head, cute body</div>
+                                        </div>
+                                    </label>
 
-                            <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${styleMode === 'original' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-200'}`}>
-                                <input type="radio" name="style" checked={styleMode === 'original'} onChange={() => { setStyleMode('original'); setProcessedImage(originalImage); }} className="w-5 h-5 accent-indigo-600" />
-                                <div>
-                                    <div className="font-bold text-slate-800">Original</div>
-                                    <div className="text-xs text-slate-500">Use photo as-is (Landscapes)</div>
+                                    <label className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${styleMode === 'icon' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-200'}`}>
+                                        <input 
+                                            type="radio" 
+                                            name="style" 
+                                            checked={styleMode === 'icon'} 
+                                            onChange={() => { setStyleMode('icon'); setProcessedImage(null); }} 
+                                            className="w-5 h-5 accent-indigo-600" 
+                                        />
+                                        <div>
+                                            <div className="font-bold text-slate-800">Flat Icon</div>
+                                            <div className="text-xs text-slate-500">Vector style for objects</div>
+                                        </div>
+                                    </label>
                                 </div>
-                            </label>
-                        </div>
-
-                        {/* AI Generate Button (Only for AI modes) */}
-                        {styleMode !== 'original' && (
-                            <div className="mb-6">
-                                {!processedImage ? (
-                                    <button 
-                                        onClick={handleGenerateAI}
-                                        disabled={isGeneratingAI}
-                                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                                    >
-                                        {isGeneratingAI ? (
-                                            <>
-                                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                                <span>Generating Art...</span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <span>🎨</span> Create AI Art
-                                            </>
-                                        )}
-                                    </button>
-                                ) : (
-                                    <div className="relative rounded-xl overflow-hidden border-2 border-indigo-100 group">
-                                        <img src={processedImage} alt="AI Result" className="w-full h-auto" />
-                                        <div className="absolute bottom-2 right-2 flex gap-2">
-                                             <button onClick={() => setShowRefineModal(true)} className="bg-white/90 text-slate-700 px-3 py-1 rounded-lg text-xs font-bold shadow-sm hover:bg-white">Refine</button>
-                                             <button onClick={() => setProcessedImage(null)} className="bg-white/90 text-red-600 px-3 py-1 rounded-lg text-xs font-bold shadow-sm hover:bg-white">Retry</button>
+                                
+                                {/* CUSTOM PROMPT INPUT (Only for AI modes) */}
+                                {styleMode !== 'original' && (
+                                    <div className="mt-4 animate-fade-in">
+                                        <label className="text-xs font-bold text-slate-700 mb-1 block">
+                                            Custom Instructions <span className="text-slate-400 font-normal">(Optional)</span>
+                                        </label>
+                                        <textarea
+                                            value={customPrompt}
+                                            onChange={(e) => setCustomPrompt(e.target.value)}
+                                            placeholder="e.g. Make the hair pink, hold a sword, wink left eye..."
+                                            className="w-full border-2 border-slate-200 rounded-lg p-2 text-sm focus:border-indigo-500 outline-none h-20 resize-none bg-slate-50"
+                                        />
+                                        
+                                        <div className="mt-3">
+                                            {!processedImage ? (
+                                                <button 
+                                                    onClick={handleGenerateAI}
+                                                    disabled={isGeneratingAI}
+                                                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                                                >
+                                                    {isGeneratingAI ? (
+                                                        <>
+                                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                            <span>Generating Art...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span>✨</span> Generate AI Art
+                                                        </>
+                                                    )}
+                                                </button>
+                                            ) : (
+                                                <div className="relative rounded-xl overflow-hidden border-2 border-indigo-100 group">
+                                                    <img src={processedImage} alt="AI Result" className="w-full h-auto" />
+                                                    <div className="absolute bottom-2 right-2 flex gap-2">
+                                                         <button onClick={() => setShowRefineModal(true)} className="bg-white/90 text-slate-700 px-3 py-1 rounded-lg text-xs font-bold shadow-sm hover:bg-white">Refine</button>
+                                                         <button onClick={() => setProcessedImage(null)} className="bg-white/90 text-red-600 px-3 py-1 rounded-lg text-xs font-bold shadow-sm hover:bg-white">Retry</button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
                             </div>
-                        )}
+                        </div>
 
                         {/* Size Slider & Generate Pattern */}
                         {currentPreview && (
-                            <div className="animate-fade-in space-y-4 pt-4 border-t border-slate-100">
+                            <div className="animate-fade-in space-y-4 pt-4 border-t border-slate-100 mt-6">
                                 <div>
                                     <div className="flex justify-between items-center mb-2">
                                         <label className="text-xs font-bold text-slate-400 uppercase">Grid Size</label>
