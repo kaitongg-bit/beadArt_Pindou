@@ -4,7 +4,7 @@
 
 # 拼豆+AI拼豆图纸生成 Bead art + AI bead art pattern generation
 <img width="967" height="597" alt="image" src="https://github.com/user-attachments/assets/7077d7d9-8aff-49ad-883b-4cb023d7110f" />
-体验：https://ai.studio/apps/drive/1HnSkK9eGZLJVShfYj2xL6fM_yABmjIOS
+# 体验：https://ai.studio/apps/drive/1HnSkK9eGZLJVShfYj2xL6fM_yABmjIOS
 ## Run Locally
 
 **Prerequisites:**  Node.js
