@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BrickGift - Custom Brick Gifts</title>
+    <title>BrickGift - 积木礼坊</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
       body {
-        font-family: 'Fredoka', sans-serif;
+        font-family: 'Noto Sans SC', sans-serif;
         background-color: #f8fafc;
       }
       /* Custom scrollbar for component lists */
@@ -19,37 +19,25 @@
           -ms-overflow-style: none;
           scrollbar-width: none;
       }
-      .lego-pattern {
-        background-color: #f8fafc;
-        background-image: radial-gradient(#cbd5e1 2px, transparent 2px);
-        background-size: 24px 24px;
+      
+      .grid-pattern {
+        background-size: 40px 40px;
+        background-image:
+          linear-gradient(to right, rgba(0,0,0,0.05) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(0,0,0,0.05) 1px, transparent 1px);
       }
 
-      /* 3D Transform Utilities for BrickMe Preview */
-      .perspective-800 {
-        perspective: 800px;
-      }
-      .transform-style-3d {
-        transform-style: preserve-3d;
-      }
-      .translate-z-16 {
-        transform: translateZ(64px); /* 4rem */
-      }
-      .rotate-x-90 {
-        transform: rotateX(90deg);
-      }
-      
       @keyframes float {
-        0%, 100% { transform: rotateY(-10deg) translateY(0); }
-        50% { transform: rotateY(10deg) translateY(-10px); }
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-5px); }
       }
       .animate-float {
-        animation: float 6s ease-in-out infinite;
+        animation: float 4s ease-in-out infinite;
       }
 
       /* PRINT STYLES */
       @media print {
-        @page { margin: 0.5cm; }
+        @page { margin: 0; }
         body, #root, main {
             height: auto !important;
             overflow: visible !important;
@@ -57,10 +45,6 @@
         }
         .no-print {
             display: none !important;
-        }
-        * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
         }
       }
     </style>
@@ -78,7 +62,7 @@
 }
 </script>
 </head>
-  <body class="lego-pattern">
+  <body class="grid-pattern">
     <div id="root"></div>
   </body>
 </html>
