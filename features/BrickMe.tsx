@@ -52,7 +52,9 @@ const BEAD_LABS = BEAD_COLORS.map(color => {
 
 const getNearestBeadColor = (r: number, g: number, b: number) => {
     // 1. Dark Threshold - Keep absolute blacks strictly black
-    if (r < 30 && g < 30 && b < 30) {
+    // Increased threshold to 80 to catch dark gray anti-aliasing artifacts
+    // and force them to black for a cleaner, bolder look.
+    if (r < 80 && g < 80 && b < 80) {
         return BEAD_COLORS.find(c => c.id === 'H7') || BEAD_COLORS.find(c => c.id === 'H6') || BEAD_COLORS[0];
     }
 
@@ -243,7 +245,7 @@ export const BrickMe: React.FC = () => {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        ctx.imageSmoothingEnabled = false;
+        // Note: setting ctx.imageSmoothingEnabled here is useless because resizing canvas resets context.
 
         const img = new Image();
         img.src = imgSrc;
@@ -251,6 +253,10 @@ export const BrickMe: React.FC = () => {
             canvas.width = size;
             canvas.height = size;
             
+            // IMPORTANT: Disable smoothing AFTER resizing canvas to ensure nearest-neighbor sampling.
+            // This prevents black lines from becoming gray fuzzy edges.
+            ctx.imageSmoothingEnabled = false; 
+
             ctx.fillStyle = '#FF00FF'; 
             ctx.fillRect(0, 0, size, size);
 
@@ -286,7 +292,10 @@ export const BrickMe: React.FC = () => {
                     const a = data[i + 3];
 
                     if (a < 50) continue;
+                    // Skip pink debug background
                     if (r > 250 && g < 10 && b > 250) continue;
+                    
+                    // Skip background color (approx matching)
                     const distToBg = Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB);
                     if (distToBg < 30 || (r > 240 && g > 240 && b > 240)) continue;
 
@@ -295,7 +304,8 @@ export const BrickMe: React.FC = () => {
                 }
             }
 
-            // 2. Consolidate Colors (Simple pass)
+            // 2. Consolidate Colors
+            // Increased threshold to reduce noise (1.5% of total dots)
             if (rawPixels.length > 0) {
                 const tempCounts: Record<string, number> = {};
                 rawPixels.forEach(p => {
@@ -303,11 +313,12 @@ export const BrickMe: React.FC = () => {
                 });
 
                 const totalDots = rawPixels.length;
-                const threshold = totalDots * 0.01; 
+                const threshold = totalDots * 0.015; 
                 const majorColors = Object.keys(tempCounts).filter(id => tempCounts[id] > threshold);
 
                 if (majorColors.length >= 2) {
                     rawPixels = rawPixels.map(p => {
+                        // If a color is too rare, try to map it to a visually similar major color
                         if (tempCounts[p.color.id] <= threshold) {
                             let bestMajor = p.color;
                             let minMajorDiff = Infinity;
@@ -332,7 +343,8 @@ export const BrickMe: React.FC = () => {
                                 }
                             });
 
-                            if (minMajorDiff < 200) {
+                            // Allow slightly looser match for consolidation to clean up noise
+                            if (minMajorDiff < 400) {
                                 return { ...p, color: bestMajor };
                             }
                         }

@@ -2,14 +2,13 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# 拼豆+AI拼豆图纸生成 Bead art + AI bead art pattern generation
-<img width="967" height="597" alt="image" src="https://github.com/user-attachments/assets/7077d7d9-8aff-49ad-883b-4cb023d7110f" />
+# Run and deploy your AI Studio app
 
+This contains everything you need to run your app locally.
 
-# 体验link
-https://ai.studio/apps/drive/1HnSkK9eGZLJVShfYj2xL6fM_yABmjIOS
+View your app in AI Studio: https://ai.studio/apps/drive/1HnSkK9eGZLJVShfYj2xL6fM_yABmjIOS
 
-# Run Locally
+## Run Locally
 
 **Prerequisites:**  Node.js
 
