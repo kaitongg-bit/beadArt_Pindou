@@ -52,8 +52,6 @@ const BEAD_LABS = BEAD_COLORS.map(color => {
 
 const getNearestBeadColor = (r: number, g: number, b: number) => {
     // 1. Dark Threshold - Keep absolute blacks strictly black
-    // Increased threshold to 80 to catch dark gray anti-aliasing artifacts
-    // and force them to black for a cleaner, bolder look.
     if (r < 80 && g < 80 && b < 80) {
         return BEAD_COLORS.find(c => c.id === 'H7') || BEAD_COLORS.find(c => c.id === 'H6') || BEAD_COLORS[0];
     }
@@ -77,7 +75,10 @@ const getNearestBeadColor = (r: number, g: number, b: number) => {
     return nearest;
 };
 
-// Forces any image into a square canvas with GENEROUS white padding
+// Forces any image into a square canvas with GENEROUS padding.
+// CRITICAL FIX: Use TRANSPARENT background, not white.
+// This allows the pixel processor to distinguish "Added Padding" (Transparent)
+// from "Subject White Clothes" (Solid White).
 const padImageToSquare = (base64Str: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new Image();
@@ -105,9 +106,8 @@ const padImageToSquare = (base64Str: string): Promise<string> => {
                 return;
             }
 
-            // Fill white background
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(0, 0, finalSize, finalSize);
+            // Do NOT fill with White. Leave transparent.
+            ctx.clearRect(0, 0, finalSize, finalSize);
 
             // Draw centered
             const drawW = img.width * scale;
@@ -119,7 +119,8 @@ const padImageToSquare = (base64Str: string): Promise<string> => {
             ctx.imageSmoothingQuality = 'high';
             
             ctx.drawImage(img, x, y, drawW, drawH);
-            resolve(canvas.toDataURL('image/jpeg', 0.8));
+            // Must use PNG to preserve transparency
+            resolve(canvas.toDataURL('image/png'));
         };
         img.onerror = () => resolve(base64Str);
     });
@@ -147,6 +148,7 @@ export const BrickMe: React.FC = () => {
     const [zoomLevel, setZoomLevel] = useState<number>(1.0);
     const [isExporting, setIsExporting] = useState(false);
     const [showSymbols, setShowSymbols] = useState(true);
+    const [keepWhite, setKeepWhite] = useState(false); // New state for white beads
 
     // Refine Modal State
     const [showRefineModal, setShowRefineModal] = useState(false);
@@ -245,20 +247,18 @@ export const BrickMe: React.FC = () => {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Note: setting ctx.imageSmoothingEnabled here is useless because resizing canvas resets context.
-
         const img = new Image();
         img.src = imgSrc;
         img.onload = () => {
             canvas.width = size;
             canvas.height = size;
             
-            // IMPORTANT: Disable smoothing AFTER resizing canvas to ensure nearest-neighbor sampling.
-            // This prevents black lines from becoming gray fuzzy edges.
-            ctx.imageSmoothingEnabled = false; 
+            // ENABLE smoothing for better connectivity of thin lines during downscale
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
 
-            ctx.fillStyle = '#FF00FF'; 
-            ctx.fillRect(0, 0, size, size);
+            // Clear canvas to transparent
+            ctx.clearRect(0, 0, size, size);
 
             const PADDING_FACTOR = 0.90; 
             const scale = (size * PADDING_FACTOR) / Math.max(img.width, img.height);
@@ -267,45 +267,126 @@ export const BrickMe: React.FC = () => {
             
             const dx = Math.floor((size - drawWidth) / 2);
             const dy = Math.floor((size - drawHeight) / 2);
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(dx, dy, drawWidth, drawHeight);
             
             ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, drawWidth, drawHeight);
 
             const imageData = ctx.getImageData(0, 0, size, size);
             const data = imageData.data;
             
-            const bgR = data[0];
-            const bgG = data[1];
-            const bgB = data[2];
+            // --- STEP 1: SMART CONTRAST SNAP ---
+            // Adjusted logic: Do NOT snap faint light grays (outlines) to white.
+            // Raise threshold to 240 to preserve 230-ish grays which act as boundaries.
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i+1];
+                const b = data[i+2];
+                const a = data[i+3];
+
+                if (a < 50) continue; // Skip transparency
+
+                // Check for neutrality (grayscale-ness)
+                const isNeutral = Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && Math.abs(r - b) < 30;
+
+                // Snap Dark Neutrals to pure Black (110 is a safe threshold for outlines)
+                if (isNeutral && r < 120) {
+                    data[i] = 0; data[i+1] = 0; data[i+2] = 0;
+                }
+                // Snap Very Light Neutrals to pure White
+                // Increased to 240 to avoid deleting faint outline borders
+                else if (isNeutral && r > 240) {
+                    data[i] = 255; data[i+1] = 255; data[i+2] = 255;
+                }
+            }
+
+            // --- STEP 2: FLOOD FILL BACKGROUND DETECTION ---
+            // Only runs on SOLID opaque pixels. Transparency is already handled by loop skip.
+            // This flood fill is intended to remove the ORIGINAL IMAGE BACKGROUND if it exists.
+            const visited = new Int8Array(size * size); 
+            const queue: number[] = [];
+
+            // Find the first solid pixel to check if it's "Background White"
+            // We search from corners inwards.
+            const getIdx = (x: number, y: number) => y * size + x;
+            
+            // Function to check if a pixel should be treated as "Floodable Background"
+            // If keepWhite is TRUE, we strictly DO NOT flood fill white.
+            const matchBgColor = (idx: number) => {
+                const i = idx * 4;
+                // If it's transparent, it's not a color we flood fill (we just ignore it later)
+                if (data[i+3] < 50) return false;
+
+                // If keepWhite is on, we NEVER treat white as background to be removed.
+                if (keepWhite) {
+                    return false;
+                }
+                
+                // Otherwise, check if it's white
+                return data[i] > 240 && data[i+1] > 240 && data[i+2] > 240;
+            };
+
+            // Seed the queue with corners if they match the background criteria
+            // (e.g., user uploaded a JPG with white BG and didn't check Keep White)
+            const corners = [0, size-1, size*(size-1), size*size-1];
+            corners.forEach(c => {
+                 if (matchBgColor(c)) {
+                     queue.push(c);
+                     visited[c] = 1;
+                 }
+            });
+
+            while (queue.length > 0) {
+                const idx = queue.pop()!;
+                const x = idx % size;
+                const y = Math.floor(idx / size);
+
+                const neighbors = [
+                    { nx: x + 1, ny: y },
+                    { nx: x - 1, ny: y },
+                    { nx: x, ny: y + 1 },
+                    { nx: x, ny: y - 1 }
+                ];
+
+                for (const { nx, ny } of neighbors) {
+                    if (nx >= 0 && nx < size && ny >= 0 && ny < size) {
+                        const nIdx = getIdx(nx, ny);
+                        // If it matches criteria and hasn't been visited
+                        if (visited[nIdx] === 0 && matchBgColor(nIdx)) {
+                            visited[nIdx] = 1;
+                            queue.push(nIdx);
+                        }
+                    }
+                }
+            }
 
             let rawPixels: {x: number, y: number, color: BeadColor}[] = [];
 
-            // 1. Map to Palette
+            // --- STEP 3: MAPPING ---
             for (let y = 0; y < size; y++) {
                 for (let x = 0; x < size; x++) {
-                    const i = (y * size + x) * 4;
+                    const idx = y * size + x;
+                    const i = idx * 4;
                     const r = data[i];
                     const g = data[i + 1];
                     const b = data[i + 2];
                     const a = data[i + 3];
 
+                    // 1. Skip Transparent Padding (Added by padImageToSquare)
                     if (a < 50) continue;
-                    // Skip pink debug background
-                    if (r > 250 && g < 10 && b > 250) continue;
-                    
-                    // Skip background color (approx matching)
-                    const distToBg = Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB);
-                    if (distToBg < 30 || (r > 240 && g > 240 && b > 240)) continue;
+
+                    // 2. Skip Flood-Filled Background (Original Image BG)
+                    if (visited[idx] === 1) continue;
+
+                    // 3. Fallback: If keepWhite is FALSE, still treat random isolated whites as transparent
+                    if (!keepWhite) {
+                        if (r > 240 && g > 240 && b > 240) continue;
+                    }
 
                     const matchedColor = getNearestBeadColor(r, g, b);
                     rawPixels.push({ x, y, color: matchedColor });
                 }
             }
 
-            // 2. Consolidate Colors
-            // Increased threshold to reduce noise (1.5% of total dots)
+            // 2. Consolidate Colors (Same logic as before)
             if (rawPixels.length > 0) {
                 const tempCounts: Record<string, number> = {};
                 rawPixels.forEach(p => {
@@ -318,7 +399,6 @@ export const BrickMe: React.FC = () => {
 
                 if (majorColors.length >= 2) {
                     rawPixels = rawPixels.map(p => {
-                        // If a color is too rare, try to map it to a visually similar major color
                         if (tempCounts[p.color.id] <= threshold) {
                             let bestMajor = p.color;
                             let minMajorDiff = Infinity;
@@ -343,7 +423,6 @@ export const BrickMe: React.FC = () => {
                                 }
                             });
 
-                            // Allow slightly looser match for consolidation to clean up noise
                             if (minMajorDiff < 400) {
                                 return { ...p, color: bestMajor };
                             }
@@ -353,27 +432,52 @@ export const BrickMe: React.FC = () => {
                 }
             }
 
-            // 3. Final Counts & Sort Pixels (Row by Row for Chart)
-            const finalCounts: Record<string, number> = {};
-            // Fill a complete grid
-            const fullGrid: (BeadColor | null)[] = new Array(size * size).fill(null);
-            
+            // --- AUTO CROP / TRIM LOGIC ---
+            if (rawPixels.length === 0) {
+                setPattern({ width: size, height: size, pixels: [], counts: {} });
+                setIsPixelating(false);
+                setStatusMsg('没有检测到有效像素');
+                return;
+            }
+
+            let minX = size, maxX = 0, minY = size, maxY = 0;
             rawPixels.forEach(p => {
-                finalCounts[p.color.id] = (finalCounts[p.color.id] || 0) + 1;
-                fullGrid[p.y * size + p.x] = p.color;
+                if (p.x < minX) minX = p.x;
+                if (p.x > maxX) maxX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.y > maxY) maxY = p.y;
             });
 
-            // Rebuild pixels list to include nulls (transparent) for the chart grid
+            const trimmedWidth = maxX - minX + 1;
+            const trimmedHeight = maxY - minY + 1;
+
+            const finalCounts: Record<string, number> = {};
+            
+            const fullGrid: (BeadColor | null)[] = new Array(trimmedWidth * trimmedHeight).fill(null);
+
+            rawPixels.forEach(p => {
+                const newX = p.x - minX;
+                const newY = p.y - minY;
+                
+                finalCounts[p.color.id] = (finalCounts[p.color.id] || 0) + 1;
+                fullGrid[newY * trimmedWidth + newX] = p.color;
+            });
+
             const gridPixels: BeadPixel[] = fullGrid.map((color, idx) => ({
-                x: idx % size,
-                y: Math.floor(idx / size),
+                x: idx % trimmedWidth,
+                y: Math.floor(idx / trimmedWidth),
                 color: color || { id: '', name: '', hex: 'transparent', symbol: '' }
             }));
 
-            setPattern({ width: size, height: size, pixels: gridPixels, counts: finalCounts });
+            setPattern({ 
+                width: trimmedWidth, 
+                height: trimmedHeight, 
+                pixels: gridPixels, 
+                counts: finalCounts 
+            });
+
             setIsPixelating(false);
             setStatusMsg('');
-            // Defer auto-fit slightly to let React render
             setTimeout(handleAutoFit, 100);
         };
     };
@@ -381,19 +485,18 @@ export const BrickMe: React.FC = () => {
     const handleAutoFit = () => {
         if (!pattern || !viewportRef.current) return;
         const { clientWidth, clientHeight } = viewportRef.current;
-        const padding = 60; // More padding for rulers
+        const padding = 60; 
         const availableW = clientWidth - padding;
         const availableH = clientHeight - padding;
         
-        const contentW = (pattern.width + 1) * BASE_CELL_SIZE; // +1 for ruler
+        const contentW = (pattern.width + 1) * BASE_CELL_SIZE; 
         const contentH = (pattern.height + 1) * BASE_CELL_SIZE;
 
         const scaleW = availableW / contentW;
         const scaleH = availableH / contentH;
         
-        // Allow zooming out significantly for large patterns
         const newZoom = Math.min(scaleW, scaleH, 1.2);
-        setZoomLevel(Math.max(0.05, newZoom)); // Min zoom 0.05x to fit big charts
+        setZoomLevel(Math.max(0.05, newZoom)); 
     };
 
     // --- EXPORT FUNCTION ---
@@ -403,9 +506,6 @@ export const BrickMe: React.FC = () => {
 
         setTimeout(() => {
             try {
-                // OPTIMIZATION: Dynamic Resolution Scaling
-                // Cap the maximum output dimension to approx 4000px (approx A3 size at 300dpi).
-                // This prevents massive file sizes for 100+ pixel grids.
                 const MAX_CANVAS_DIMENSION = 4000;
                 const BASE_PX = 50; 
                 const maxSide = Math.max(pattern.width, pattern.height);
@@ -414,19 +514,15 @@ export const BrickMe: React.FC = () => {
                 if (maxSide * BASE_PX > MAX_CANVAS_DIMENSION) {
                     PX_PER_CELL = Math.floor(MAX_CANVAS_DIMENSION / maxSide);
                 }
-                // Ensure a minimum readable size
                 PX_PER_CELL = Math.max(PX_PER_CELL, 10);
 
                 const RULER_SIZE = PX_PER_CELL;
                 const PADDING = 40;
                 
-                // Canvas Dimensions for the Grid Part
                 const gridW = pattern.width * PX_PER_CELL;
                 const gridH = pattern.height * PX_PER_CELL;
                 
-                // --- LEGEND LAYOUT CALCULATIONS ---
-                // We want: [Swatch (with text inside)] and [Count (below)]
-                // Group Size:
+                // --- LEGEND LAYOUT ---
                 const SWATCH_SIZE = 90;
                 const TEXT_HEIGHT_BELOW = 50;
                 const GROUP_W = 100;
@@ -435,15 +531,12 @@ export const BrickMe: React.FC = () => {
                 const GAP_Y = 40;
                 const LEGEND_PADDING_TOP = 100;
 
-                // Total Width based on Grid
                 const totalW = Math.max(gridW + RULER_SIZE + (PADDING * 2), 800);
-                
-                // Calculate columns for legend
                 const legendAreaW = totalW - (PADDING * 2);
                 const legendCols = Math.floor(legendAreaW / (GROUP_W + GAP_X));
                 const distinctColors = Object.entries(pattern.counts);
                 const legendRows = Math.ceil(distinctColors.length / legendCols);
-                const legendH = (legendRows * (GROUP_H + GAP_Y)) + LEGEND_PADDING_TOP + 100; // +100 for footer/buffer
+                const legendH = (legendRows * (GROUP_H + GAP_Y)) + LEGEND_PADDING_TOP + 100;
 
                 const totalH = gridH + RULER_SIZE + (PADDING * 2) + legendH;
 
@@ -453,34 +546,28 @@ export const BrickMe: React.FC = () => {
                 const ctx = cvs.getContext('2d');
                 if (!ctx) return;
 
-                // 1. Background
                 ctx.fillStyle = '#FFFFFF';
                 ctx.fillRect(0, 0, cvs.width, cvs.height);
 
-                // 2. Draw Grid & Content
                 const startX = PADDING + RULER_SIZE;
                 const startY = PADDING + RULER_SIZE;
 
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                // Draw Rulers
-                ctx.fillStyle = '#64748b'; // Slate 500
+                ctx.fillStyle = '#000000'; 
                 ctx.font = `bold ${PX_PER_CELL * 0.4}px sans-serif`;
                 
-                // Top Ruler (Columns)
                 for (let x = 0; x < pattern.width; x++) {
                     const cx = startX + (x * PX_PER_CELL) + (PX_PER_CELL/2);
                     ctx.fillText(`${x + 1}`, cx, PADDING + (RULER_SIZE/2));
                 }
                 
-                // Left Ruler (Rows)
                 for (let y = 0; y < pattern.height; y++) {
                     const cy = startY + (y * PX_PER_CELL) + (PX_PER_CELL/2);
                     ctx.fillText(`${y + 1}`, PADDING + (RULER_SIZE/2), cy);
                 }
 
-                // Draw Pixels
                 pattern.pixels.forEach(p => {
                     const px = startX + (p.x * PX_PER_CELL);
                     const py = startY + (p.y * PX_PER_CELL);
@@ -489,7 +576,6 @@ export const BrickMe: React.FC = () => {
                         ctx.fillStyle = p.color.hex;
                         ctx.fillRect(px, py, PX_PER_CELL, PX_PER_CELL);
 
-                        // Text Contrast
                         const r = parseInt(p.color.hex.slice(1,3), 16);
                         const g = parseInt(p.color.hex.slice(3,5), 16);
                         const b = parseInt(p.color.hex.slice(5,7), 16);
@@ -499,35 +585,30 @@ export const BrickMe: React.FC = () => {
                         ctx.font = `bold ${PX_PER_CELL * 0.35}px sans-serif`;
                         ctx.fillText(p.color.symbol, px + PX_PER_CELL/2, py + PX_PER_CELL/2);
                     } else {
-                        // Empty cell pattern
                          ctx.fillStyle = '#f8fafc';
                          ctx.fillRect(px, py, PX_PER_CELL, PX_PER_CELL);
                     }
                 });
 
-                // Draw Grid Lines (After pixels so they sit on top)
                 ctx.lineWidth = 1;
-                ctx.strokeStyle = '#cbd5e1'; // Light grey
+                ctx.strokeStyle = '#94a3b8'; 
 
-                // Vertical Lines
                 for (let x = 0; x <= pattern.width; x++) {
                     const xPos = startX + (x * PX_PER_CELL);
                     ctx.beginPath();
                     ctx.moveTo(xPos, startY);
                     ctx.lineTo(xPos, startY + gridH);
                     
-                    // Bold every 5th line
                     if (x % 5 === 0) {
                         ctx.lineWidth = 3;
-                        ctx.strokeStyle = '#94a3b8';
+                        ctx.strokeStyle = '#475569'; 
                     } else {
                         ctx.lineWidth = 1;
-                        ctx.strokeStyle = '#e2e8f0';
+                        ctx.strokeStyle = '#cbd5e1';
                     }
                     ctx.stroke();
                 }
 
-                // Horizontal Lines
                 for (let y = 0; y <= pattern.height; y++) {
                     const yPos = startY + (y * PX_PER_CELL);
                     ctx.beginPath();
@@ -536,18 +617,16 @@ export const BrickMe: React.FC = () => {
                     
                     if (y % 5 === 0) {
                         ctx.lineWidth = 3;
-                        ctx.strokeStyle = '#94a3b8';
+                        ctx.strokeStyle = '#475569';
                     } else {
                         ctx.lineWidth = 1;
-                        ctx.strokeStyle = '#e2e8f0';
+                        ctx.strokeStyle = '#cbd5e1';
                     }
                     ctx.stroke();
                 }
 
-                // 3. Draw Legend - NEW LAYOUT
                 const legendStartY = startY + gridH + LEGEND_PADDING_TOP;
                 
-                // Legend Title (Centered)
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#0f172a';
                 ctx.font = 'bold 48px sans-serif'; 
@@ -563,11 +642,9 @@ export const BrickMe: React.FC = () => {
                     const col = idx % legendCols;
                     const row = Math.floor(idx / legendCols);
                     
-                    // Calculate center position for this group
                     const groupX = PADDING + (col * (GROUP_W + GAP_X)) + (GROUP_W / 2);
                     const groupY = legendStartY + (row * (GROUP_H + GAP_Y));
 
-                    // 1. Draw Swatch (Rounded Rect)
                     const swatchX = groupX - (SWATCH_SIZE / 2);
                     const swatchY = groupY;
                     
@@ -575,12 +652,10 @@ export const BrickMe: React.FC = () => {
                     ctx.roundRect(swatchX, swatchY, SWATCH_SIZE, SWATCH_SIZE, 16);
                     ctx.fillStyle = color.hex;
                     ctx.fill();
-                    // Border slightly
-                    ctx.lineWidth = 1;
-                    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
                     ctx.stroke();
 
-                    // 2. Draw Code Inside Swatch
                     const r = parseInt(color.hex.slice(1,3), 16);
                     const g = parseInt(color.hex.slice(3,5), 16);
                     const b = parseInt(color.hex.slice(5,7), 16);
@@ -591,7 +666,6 @@ export const BrickMe: React.FC = () => {
                     ctx.font = 'bold 32px sans-serif';
                     ctx.fillText(color.symbol, groupX, swatchY + (SWATCH_SIZE / 2));
 
-                    // 3. Draw Count Below Swatch
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'top';
                     ctx.fillStyle = '#000000';
@@ -599,7 +673,7 @@ export const BrickMe: React.FC = () => {
                     ctx.fillText(`${count}`, groupX, swatchY + SWATCH_SIZE + 10);
                 });
                 
-                const finalName = projectName.trim() || `brick-gift-${boardSize}x${boardSize}`;
+                const finalName = projectName.trim() || `brick-gift-${pattern.width}x${pattern.height}`;
 
                 if (format === 'png') {
                     const link = document.createElement('a');
@@ -607,34 +681,27 @@ export const BrickMe: React.FC = () => {
                     link.href = cvs.toDataURL('image/png');
                     link.click();
                 } else {
-                    // PDF Logic Optimized
-                    // A4 size: 210mm x 297mm
                     const pdf = new jsPDF({
                         orientation: cvs.width > cvs.height ? 'l' : 'p',
                         unit: 'mm',
                         format: 'a4',
-                        compress: true // Turn on compression
+                        compress: true
                     });
                     
                     const pageWidth = pdf.internal.pageSize.getWidth();
                     const pageHeight = pdf.internal.pageSize.getHeight();
-                    
-                    // Add margins
                     const margin = 10;
                     const maxW = pageWidth - (margin * 2);
                     const maxH = pageHeight - (margin * 2);
                     
                     const ratio = Math.min(maxW / cvs.width, maxH / cvs.height);
-                    
                     const imgW = cvs.width * ratio;
                     const imgH = cvs.height * ratio;
                     
                     const x = (pageWidth - imgW) / 2;
-                    const y = margin; // Top align with margin
+                    const y = margin;
                     
-                    // Use JPEG compression (0.7 quality) for PDF to significantly reduce size
-                    // PNG base64 is huge for large dimensions.
-                    const imgData = cvs.toDataURL('image/jpeg', 0.7);
+                    const imgData = cvs.toDataURL('image/jpeg', 0.8);
                     
                     pdf.addImage(imgData, 'JPEG', x, y, imgW, imgH);
                     pdf.save(`${finalName}.pdf`);
@@ -744,7 +811,7 @@ export const BrickMe: React.FC = () => {
                                 <div className="space-y-4">
                                     <div>
                                         <div className="flex justify-between items-center mb-2">
-                                            <label className="text-xs font-bold text-slate-400">像素尺寸</label>
+                                            <label className="text-xs font-bold text-slate-400">最大尺寸</label>
                                             <div className="flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-1">
                                                 <input 
                                                     type="number"
@@ -769,6 +836,17 @@ export const BrickMe: React.FC = () => {
                                             onChange={(e) => setBoardSize(parseInt(e.target.value))}
                                             className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                                         />
+                                    </div>
+                                    
+                                    {/* White Bead Toggle */}
+                                    <div className="flex items-center gap-2">
+                                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                                            <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${keepWhite ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${keepWhite ? 'translate-x-3' : ''}`}></div>
+                                            </div>
+                                            <input type="checkbox" checked={keepWhite} onChange={(e) => setKeepWhite(e.target.checked)} className="hidden" />
+                                            <span className="text-xs font-bold text-slate-500">保留白色豆子</span>
+                                        </label>
                                     </div>
 
                                     <button 
@@ -850,13 +928,13 @@ export const BrickMe: React.FC = () => {
                         <div className="min-w-max min-h-max p-10 print:p-0 print:block">
                             {pattern ? (
                                 <div className="bg-white shadow-2xl inline-block p-4 rounded-sm">
-                                    {/* Ruler Top */}
-                                    <div className="flex" style={{ marginLeft: `${cellSize}px` }}>
+                                    {/* Ruler Top - STICKY */}
+                                    <div className="flex sticky top-0 z-20 bg-white shadow-sm" style={{ marginLeft: `${cellSize}px` }}>
                                         {Array.from({ length: pattern.width }).map((_, i) => (
                                             <div 
                                                 key={`col-${i}`} 
                                                 style={{ width: `${cellSize}px` }} 
-                                                className="text-center text-slate-400 font-bold text-[10px] pb-1"
+                                                className="text-center text-slate-400 font-bold text-[10px] pb-1 border-b border-slate-100"
                                             >
                                                 {i + 1}
                                             </div>
@@ -864,13 +942,13 @@ export const BrickMe: React.FC = () => {
                                     </div>
 
                                     <div className="flex">
-                                        {/* Ruler Left */}
-                                        <div className="flex flex-col" style={{ marginRight: '4px' }}>
+                                        {/* Ruler Left - STICKY */}
+                                        <div className="flex flex-col sticky left-0 z-20 bg-white shadow-sm" style={{ marginRight: '4px' }}>
                                             {Array.from({ length: pattern.height }).map((_, i) => (
                                                 <div 
                                                     key={`row-${i}`} 
                                                     style={{ height: `${cellSize}px` }} 
-                                                    className="flex items-center justify-end pr-2 text-slate-400 font-bold text-[10px]"
+                                                    className="flex items-center justify-end pr-2 text-slate-400 font-bold text-[10px] border-r border-slate-100"
                                                 >
                                                     {i + 1}
                                                 </div>

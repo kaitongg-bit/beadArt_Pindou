@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 
 const getClient = () => {
@@ -41,7 +40,6 @@ export const generateCartoonAvatar = async (base64Image: string, style: ArtStyle
             - MATERIAL: Ignore realistic textures (like leather gloss, fabric folds, metal shine). 
             - COLORING: Use ONE solid color for each area. For example, if a bag is brown leather, make it a single solid flat brown block. Do not simulate the 3D curve of the bag with darker browns.
             - PATTERNS: If the object has a print (like a logo pattern or monogram), keep the pattern sharp and high-contrast, but make the background behind it solid.
-            - OUTLINE: Use thick, clean lines to define shapes.
             `;
         }
 
@@ -61,12 +59,17 @@ export const generateCartoonAvatar = async (base64Image: string, style: ArtStyle
            - COLORS MUST BE SOLID AND FLAT. 
            - NO SHADING. NO "AIRBRUSH" LOOK. NO AMBIENT OCCLUSION.
 
-        2. COMPOSITION: 
+        2. OUTLINES (CRITICAL):
+           - USE A THICK, DARK (BLACK or DARK BROWN) OUTLINE around the entire subject.
+           - This outline MUST separate the subject completely from the background.
+           - Use clean, bold lines to define internal details.
+
+        3. COMPOSITION: 
            - Image MUST be a PERFECT 1:1 SQUARE.
            - Center the subject with GENEROUS WHITE PADDING (at least 15% margin on all sides).
            - Do not crop the subject.
 
-        3. BACKGROUND: 
+        4. BACKGROUND: 
            - PURE SOLID WHITE (#FFFFFF) ONLY. 
            - REMOVE all floor shadows, drop shadows, and background scenery.
         
