@@ -516,7 +516,7 @@ export const BrickMe: React.FC = () => {
                 }
                 PX_PER_CELL = Math.max(PX_PER_CELL, 10);
 
-                const RULER_SIZE = PX_PER_CELL;
+                const RULER_SIZE = PX_PER_CELL * 1.5; // Bigger space for rulers
                 const PADDING = 40;
                 
                 const gridW = pattern.width * PX_PER_CELL;
@@ -531,14 +531,15 @@ export const BrickMe: React.FC = () => {
                 const GAP_Y = 40;
                 const LEGEND_PADDING_TOP = 100;
 
-                const totalW = Math.max(gridW + RULER_SIZE + (PADDING * 2), 800);
+                // Total size includes rulers on BOTH sides + padding
+                const totalW = Math.max(RULER_SIZE + gridW + RULER_SIZE + (PADDING * 2), 800);
                 const legendAreaW = totalW - (PADDING * 2);
                 const legendCols = Math.floor(legendAreaW / (GROUP_W + GAP_X));
                 const distinctColors = Object.entries(pattern.counts);
                 const legendRows = Math.ceil(distinctColors.length / legendCols);
                 const legendH = (legendRows * (GROUP_H + GAP_Y)) + LEGEND_PADDING_TOP + 100;
 
-                const totalH = gridH + RULER_SIZE + (PADDING * 2) + legendH;
+                const totalH = RULER_SIZE + gridH + RULER_SIZE + (PADDING * 2) + legendH;
 
                 const cvs = document.createElement('canvas');
                 cvs.width = totalW;
@@ -555,17 +556,35 @@ export const BrickMe: React.FC = () => {
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
+                // RULER RENDERING
                 ctx.fillStyle = '#000000'; 
-                ctx.font = `bold ${PX_PER_CELL * 0.4}px sans-serif`;
+                // Much larger font for rulers: 80% of cell size
+                ctx.font = `bold ${PX_PER_CELL * 0.8}px sans-serif`;
                 
+                // Columns (Top & Bottom)
                 for (let x = 0; x < pattern.width; x++) {
-                    const cx = startX + (x * PX_PER_CELL) + (PX_PER_CELL/2);
-                    ctx.fillText(`${x + 1}`, cx, PADDING + (RULER_SIZE/2));
+                    const num = x + 1;
+                    if (num % 5 === 0) { // Only show every 5th number
+                        const cx = startX + (x * PX_PER_CELL) + (PX_PER_CELL/2);
+                        const label = (num / 5).toString();
+                        // Top
+                        ctx.fillText(label, cx, PADDING + (RULER_SIZE/2));
+                        // Bottom
+                        ctx.fillText(label, cx, startY + gridH + (RULER_SIZE/2));
+                    }
                 }
                 
+                // Rows (Left & Right)
                 for (let y = 0; y < pattern.height; y++) {
-                    const cy = startY + (y * PX_PER_CELL) + (PX_PER_CELL/2);
-                    ctx.fillText(`${y + 1}`, PADDING + (RULER_SIZE/2), cy);
+                    const num = y + 1;
+                    if (num % 5 === 0) { // Only show every 5th number
+                        const cy = startY + (y * PX_PER_CELL) + (PX_PER_CELL/2);
+                        const label = (num / 5).toString();
+                        // Left
+                        ctx.fillText(label, PADDING + (RULER_SIZE/2), cy);
+                        // Right
+                        ctx.fillText(label, startX + gridW + (RULER_SIZE/2), cy);
+                    }
                 }
 
                 pattern.pixels.forEach(p => {
@@ -625,7 +644,7 @@ export const BrickMe: React.FC = () => {
                     ctx.stroke();
                 }
 
-                const legendStartY = startY + gridH + LEGEND_PADDING_TOP;
+                const legendStartY = startY + gridH + RULER_SIZE + LEGEND_PADDING_TOP;
                 
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#0f172a';
@@ -930,29 +949,37 @@ export const BrickMe: React.FC = () => {
                                 <div className="bg-white shadow-2xl inline-block p-4 rounded-sm">
                                     {/* Ruler Top - STICKY */}
                                     <div className="flex sticky top-0 z-20 bg-white shadow-sm" style={{ marginLeft: `${cellSize}px` }}>
-                                        {Array.from({ length: pattern.width }).map((_, i) => (
-                                            <div 
-                                                key={`col-${i}`} 
-                                                style={{ width: `${cellSize}px` }} 
-                                                className="text-center text-slate-400 font-bold text-[10px] pb-1 border-b border-slate-100"
-                                            >
-                                                {i + 1}
-                                            </div>
-                                        ))}
+                                        {Array.from({ length: pattern.width }).map((_, i) => {
+                                            const num = i + 1;
+                                            const isMajor = num % 5 === 0;
+                                            return (
+                                                <div 
+                                                    key={`col-${i}`} 
+                                                    style={{ width: `${cellSize}px` }} 
+                                                    className={`text-center pb-1 border-b border-slate-100 ${isMajor ? 'text-black font-black text-lg' : 'text-slate-300 text-[8px]'}`}
+                                                >
+                                                    {isMajor ? (num / 5) : ''}
+                                                </div>
+                                            );
+                                        })}
                                     </div>
 
                                     <div className="flex">
                                         {/* Ruler Left - STICKY */}
                                         <div className="flex flex-col sticky left-0 z-20 bg-white shadow-sm" style={{ marginRight: '4px' }}>
-                                            {Array.from({ length: pattern.height }).map((_, i) => (
-                                                <div 
-                                                    key={`row-${i}`} 
-                                                    style={{ height: `${cellSize}px` }} 
-                                                    className="flex items-center justify-end pr-2 text-slate-400 font-bold text-[10px] border-r border-slate-100"
-                                                >
-                                                    {i + 1}
-                                                </div>
-                                            ))}
+                                            {Array.from({ length: pattern.height }).map((_, i) => {
+                                                const num = i + 1;
+                                                const isMajor = num % 5 === 0;
+                                                return (
+                                                    <div 
+                                                        key={`row-${i}`} 
+                                                        style={{ height: `${cellSize}px` }} 
+                                                        className={`flex items-center justify-end pr-2 border-r border-slate-100 ${isMajor ? 'text-black font-black text-lg' : 'text-slate-300 text-[8px]'}`}
+                                                    >
+                                                        {isMajor ? (num / 5) : ''}
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
 
                                         {/* Grid */}
