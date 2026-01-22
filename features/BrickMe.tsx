@@ -152,7 +152,12 @@ export const BrickMe: React.FC = () => {
     const [zoomLevel, setZoomLevel] = useState<number>(1.0);
     const [isExporting, setIsExporting] = useState(false);
     const [showSymbols, setShowSymbols] = useState(true);
-    const [keepWhite, setKeepWhite] = useState(false); // New state for white beads
+    const [showGrid, setShowGrid] = useState(true); // New state for grid visibility
+    const [keepWhite, setKeepWhite] = useState(false); 
+
+    // Touch Gesture State
+    const [touchStartDist, setTouchStartDist] = useState<number>(0);
+    const [startZoom, setStartZoom] = useState<number>(1);
 
     // Refine Modal State
     const [showRefineModal, setShowRefineModal] = useState(false);
@@ -290,6 +295,34 @@ export const BrickMe: React.FC = () => {
         setActiveTool('paint');
         if (!isEditMode) setIsEditMode(true);
         setShowMobilePalette(false); // Close sheet on selection
+    };
+
+    // --- TOUCH GESTURE LOGIC (PINCH ZOOM) ---
+    const onTouchStart = (e: React.TouchEvent) => {
+        if (e.touches.length === 2) {
+            // Calculate initial distance
+            const dist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            setTouchStartDist(dist);
+            setStartZoom(zoomLevel);
+        }
+    };
+
+    const onTouchMove = (e: React.TouchEvent) => {
+        if (e.touches.length === 2) {
+            const dist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            if (touchStartDist > 0) {
+                const scale = dist / touchStartDist;
+                // Limit zoom levels
+                const newZoom = Math.max(0.05, Math.min(2.5, startZoom * scale));
+                setZoomLevel(newZoom);
+            }
+        }
     };
 
     // --- PIXELATION ALGORITHM ---
@@ -972,13 +1005,22 @@ export const BrickMe: React.FC = () => {
                              </div>
                              
                              <div className="flex items-center gap-4">
+                                {/* Grid Toggle */}
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${showGrid ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showGrid ? 'translate-x-3' : ''}`}></div>
+                                    </div>
+                                    <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} className="hidden" />
+                                    <span className="text-xs font-bold text-slate-500">网格</span>
+                                </label>
+
                                 {/* Symbol Visibility Toggle */}
                                 <label className="flex items-center gap-2 cursor-pointer select-none">
-                                    <div className={`w-10 h-6 rounded-full p-1 transition-colors ${showSymbols ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showSymbols ? 'translate-x-4' : ''}`}></div>
+                                    <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${showSymbols ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showSymbols ? 'translate-x-3' : ''}`}></div>
                                     </div>
                                     <input type="checkbox" checked={showSymbols} onChange={(e) => setShowSymbols(e.target.checked)} className="hidden" />
-                                    <span className="text-xs font-bold text-slate-500">显示色号</span>
+                                    <span className="text-xs font-bold text-slate-500">色号</span>
                                 </label>
 
                                 {/* Edit Mode Toggle */}
@@ -1026,7 +1068,12 @@ export const BrickMe: React.FC = () => {
                          </div>
                     </div>
 
-                    <div ref={viewportRef} className="flex-1 relative overflow-auto bg-slate-100 print:overflow-visible print:bg-white print:h-auto">
+                    <div 
+                        ref={viewportRef} 
+                        className="flex-1 relative overflow-auto bg-slate-100 print:overflow-visible print:bg-white print:h-auto"
+                        onTouchStart={onTouchStart}
+                        onTouchMove={onTouchMove}
+                    >
                         
                         {/* --- FLOATING EDIT TOOLBAR (DESKTOP ONLY) --- */}
                         {isEditMode && pattern && (
@@ -1059,44 +1106,48 @@ export const BrickMe: React.FC = () => {
                         <div className="min-w-max min-h-max p-10 print:p-0 print:block">
                             {pattern ? (
                                 <div className={`bg-white shadow-2xl inline-block p-4 rounded-sm ${isEditMode ? 'cursor-pointer' : ''}`}>
-                                    {/* Ruler Top - STICKY */}
-                                    <div className="flex sticky top-0 z-20 bg-white shadow-sm" style={{ marginLeft: `${cellSize}px` }}>
-                                        {Array.from({ length: pattern.width }).map((_, i) => {
-                                            const num = i + 1;
-                                            const isMajor = num % 5 === 0;
-                                            return (
-                                                <div 
-                                                    key={`col-${i}`} 
-                                                    style={{ width: `${cellSize}px` }} 
-                                                    className={`text-center pb-1 border-b border-slate-100 ${isMajor ? 'text-black font-black text-lg' : 'text-slate-300 text-[8px]'}`}
-                                                >
-                                                    {isMajor ? (num / 5) : ''}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    <div className="flex">
-                                        {/* Ruler Left - STICKY */}
-                                        <div className="flex flex-col sticky left-0 z-20 bg-white shadow-sm" style={{ marginRight: '4px' }}>
-                                            {Array.from({ length: pattern.height }).map((_, i) => {
+                                    {/* Ruler Top - STICKY (Hide if grid is off) */}
+                                    {showGrid && (
+                                        <div className="flex sticky top-0 z-20 bg-white shadow-sm" style={{ marginLeft: `${cellSize}px` }}>
+                                            {Array.from({ length: pattern.width }).map((_, i) => {
                                                 const num = i + 1;
                                                 const isMajor = num % 5 === 0;
                                                 return (
                                                     <div 
-                                                        key={`row-${i}`} 
-                                                        style={{ height: `${cellSize}px` }} 
-                                                        className={`flex items-center justify-end pr-2 border-r border-slate-100 ${isMajor ? 'text-black font-black text-lg' : 'text-slate-300 text-[8px]'}`}
+                                                        key={`col-${i}`} 
+                                                        style={{ width: `${cellSize}px` }} 
+                                                        className={`text-center pb-1 border-b border-slate-100 ${isMajor ? 'text-black font-black text-lg' : 'text-slate-300 text-[8px]'}`}
                                                     >
                                                         {isMajor ? (num / 5) : ''}
                                                     </div>
                                                 );
                                             })}
                                         </div>
+                                    )}
+
+                                    <div className="flex">
+                                        {/* Ruler Left - STICKY (Hide if grid is off) */}
+                                        {showGrid && (
+                                            <div className="flex flex-col sticky left-0 z-20 bg-white shadow-sm" style={{ marginRight: '4px' }}>
+                                                {Array.from({ length: pattern.height }).map((_, i) => {
+                                                    const num = i + 1;
+                                                    const isMajor = num % 5 === 0;
+                                                    return (
+                                                        <div 
+                                                            key={`row-${i}`} 
+                                                            style={{ height: `${cellSize}px` }} 
+                                                            className={`flex items-center justify-end pr-2 border-r border-slate-100 ${isMajor ? 'text-black font-black text-lg' : 'text-slate-300 text-[8px]'}`}
+                                                        >
+                                                            {isMajor ? (num / 5) : ''}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
 
                                         {/* Grid */}
                                         <div 
-                                            className="border-t border-l border-slate-300 select-none"
+                                            className={`select-none ${showGrid ? 'border-t border-l border-slate-300' : ''}`}
                                             style={{
                                                 display: 'grid',
                                                 gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
@@ -1116,8 +1167,8 @@ export const BrickMe: React.FC = () => {
                                                 }
 
                                                 // Thick border logic for every 5th cell
-                                                const isRightThick = (p.x + 1) % 5 === 0;
-                                                const isBottomThick = (p.y + 1) % 5 === 0;
+                                                const isRightThick = showGrid && (p.x + 1) % 5 === 0;
+                                                const isBottomThick = showGrid && (p.y + 1) % 5 === 0;
 
                                                 return (
                                                     <div 
@@ -1129,10 +1180,10 @@ export const BrickMe: React.FC = () => {
                                                         }}
                                                         className={`
                                                             flex items-center justify-center font-bold relative
-                                                            border-r border-b 
+                                                            ${showGrid ? 'border-r border-b' : ''} 
                                                             ${isEditMode ? (activeTool === 'eraser' ? 'hover:bg-red-50 hover:opacity-50' : 'hover:opacity-80') : ''}
-                                                            ${isRightThick ? 'border-r-slate-400 border-r-2' : 'border-r-slate-200'}
-                                                            ${isBottomThick ? 'border-b-slate-400 border-b-2' : 'border-b-slate-200'}
+                                                            ${showGrid && isRightThick ? 'border-r-slate-400 border-r-2' : (showGrid ? 'border-r-slate-200' : '')}
+                                                            ${showGrid && isBottomThick ? 'border-b-slate-400 border-b-2' : (showGrid ? 'border-b-slate-200' : '')}
                                                         `}
                                                         title={isEditMode ? `点击修改 (${p.x+1},${p.y+1})` : ''}
                                                     >
