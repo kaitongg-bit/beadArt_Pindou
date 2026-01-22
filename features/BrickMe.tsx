@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { generateCartoonAvatar, refinePixelArt, ArtStyle } from '../services/gemini';
+// import { generateCartoonAvatar, refinePixelArt, ArtStyle } from '../services/gemini'; // Disabled for China-ready branch
 import { BEAD_COLORS, BOARD_SIZES } from '../constants';
 import { BeadPattern, BeadPixel, BeadColor } from '../types';
 import { jsPDF } from "jspdf";
@@ -75,67 +75,14 @@ const getNearestBeadColor = (r: number, g: number, b: number) => {
     return nearest;
 };
 
-// Forces any image into a square canvas with GENEROUS padding.
-// CRITICAL FIX: Use TRANSPARENT background, not white.
-// This allows the pixel processor to distinguish "Added Padding" (Transparent)
-// from "Subject White Clothes" (Solid White).
-const padImageToSquare = (base64Str: string): Promise<string> => {
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.src = base64Str;
-        img.onload = () => {
-            const originalMax = Math.max(img.width, img.height);
-            const TARGET_MAX = 1024;
-            
-            // Calculate raw padded size (30% padding)
-            let finalSize = originalMax * 1.3;
-            
-            // Calculate scale to fit in target
-            let scale = 1;
-            if (finalSize > TARGET_MAX) {
-                scale = TARGET_MAX / finalSize;
-                finalSize = TARGET_MAX;
-            }
-
-            const canvas = document.createElement('canvas');
-            canvas.width = finalSize;
-            canvas.height = finalSize;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-                resolve(base64Str);
-                return;
-            }
-
-            // Do NOT fill with White. Leave transparent.
-            ctx.clearRect(0, 0, finalSize, finalSize);
-
-            // Draw centered
-            const drawW = img.width * scale;
-            const drawH = img.height * scale;
-            const x = (finalSize - drawW) / 2;
-            const y = (finalSize - drawH) / 2;
-            
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            
-            ctx.drawImage(img, x, y, drawW, drawH);
-            // Must use PNG to preserve transparency
-            resolve(canvas.toDataURL('image/png'));
-        };
-        img.onerror = () => resolve(base64Str);
-    });
-};
-
 // --- COMPONENT ---
 
 export const BrickMe: React.FC = () => {
     const [originalImage, setOriginalImage] = useState<string | null>(null);
-    const [processedImage, setProcessedImage] = useState<string | null>(null);
+    const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
     const [pattern, setPattern] = useState<BeadPattern | null>(null);
     
-    // --- NEW STATES FOR WORKFLOW ---
-    const [styleMode, setStyleMode] = useState<'chibi' | 'icon' | 'original'>('chibi');
-    const [customPrompt, setCustomPrompt] = useState('');
+    // --- WORKFLOW STATES ---
     const [projectName, setProjectName] = useState('MyPattern');
     
     // Mobile UX State
@@ -144,7 +91,6 @@ export const BrickMe: React.FC = () => {
     
     // Default to STANDARD board size (52)
     const [boardSize, setBoardSize] = useState<number>(32); 
-    const [isGeneratingAI, setIsGeneratingAI] = useState(false);
     const [isPixelating, setIsPixelating] = useState(false);
     const [statusMsg, setStatusMsg] = useState('');
 
@@ -152,23 +98,23 @@ export const BrickMe: React.FC = () => {
     const [zoomLevel, setZoomLevel] = useState<number>(1.0);
     const [isExporting, setIsExporting] = useState(false);
     const [showSymbols, setShowSymbols] = useState(true);
-    const [showGrid, setShowGrid] = useState(true); // New state for grid visibility
+    const [showGrid, setShowGrid] = useState(true); 
     const [keepWhite, setKeepWhite] = useState(false); 
 
     // Touch Gesture State
     const [touchStartDist, setTouchStartDist] = useState<number>(0);
     const [startZoom, setStartZoom] = useState<number>(1);
 
-    // Refine Modal State
-    const [showRefineModal, setShowRefineModal] = useState(false);
-    const [refinePrompt, setRefinePrompt] = useState('');
-    const [isRefining, setIsRefining] = useState(false);
-
     // --- EDIT MODE STATES ---
     const [isEditMode, setIsEditMode] = useState(false);
     const [activeTool, setActiveTool] = useState<'paint' | 'eraser'>('paint');
     const [selectedBrushColor, setSelectedBrushColor] = useState<BeadColor>(BEAD_COLORS[6]); // Default some color
     const [showColorPicker, setShowColorPicker] = useState(false);
+
+    // --- REFINE MODAL STATES ---
+    const [showRefineModal, setShowRefineModal] = useState(false);
+    const [refinePrompt, setRefinePrompt] = useState('');
+    const [isRefining, setIsRefining] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,52 +129,30 @@ export const BrickMe: React.FC = () => {
 
         setStatusMsg('正在读取...');
         setPattern(null);
-        setProcessedImage(null);
-        setCustomPrompt(''); 
-        setStyleMode('chibi'); 
         setIsEditMode(false);
         setActiveTab('settings'); // Stay on settings to adjust
         
         const reader = new FileReader();
         reader.onload = async (event) => {
             const rawBase64 = event.target?.result as string;
-            const squareBase64 = await padImageToSquare(rawBase64);
-            setOriginalImage(squareBase64);
+            
+            const img = new Image();
+            img.src = rawBase64;
+            await new Promise((resolve) => {
+                img.onload = () => {
+                    setImageDimensions({ width: img.width, height: img.height });
+                    resolve(true);
+                };
+            });
+
+            setOriginalImage(rawBase64);
             setStatusMsg('');
         };
         reader.readAsDataURL(file);
     };
 
-    const handleGenerateAI = async () => {
-        if (!originalImage) return;
-        
-        if (styleMode === 'original') {
-            setProcessedImage(originalImage);
-            return;
-        }
-
-        setIsGeneratingAI(true);
-        setStatusMsg('AI 正在绘制草图...');
-        try {
-            const aiStyle = styleMode === 'chibi' ? 'chibi' : 'icon';
-            const result = await generateCartoonAvatar(originalImage, aiStyle, customPrompt);
-            if (result) {
-                setProcessedImage(result);
-            } else {
-                alert("AI 生成失败，使用原图。");
-                setProcessedImage(originalImage);
-            }
-        } catch (error) {
-            console.error(error);
-            setProcessedImage(originalImage);
-        } finally {
-            setIsGeneratingAI(false);
-            setStatusMsg('');
-        }
-    };
-
     const handleGeneratePattern = () => {
-        const source = processedImage || originalImage;
+        const source = originalImage; // Use original directly, no AI
         if (!source) return;
 
         setIsPixelating(true);
@@ -242,22 +166,9 @@ export const BrickMe: React.FC = () => {
         }, 100);
     };
 
-    const handleRefine = async () => {
-        if (!processedImage || !refinePrompt.trim()) return;
-        setIsRefining(true);
-        try {
-            const newImage = await refinePixelArt(processedImage, refinePrompt);
-            if (newImage) {
-                setProcessedImage(newImage);
-                setShowRefineModal(false);
-                setRefinePrompt('');
-            }
-        } catch (e) {
-            console.error(e);
-            alert("修改失败");
-        } finally {
-            setIsRefining(false);
-        }
+    const handleRefine = () => {
+        // AI feature disabled in this version
+        setShowRefineModal(false);
     };
 
     // --- PIXEL EDITING LOGIC ---
@@ -270,7 +181,6 @@ export const BrickMe: React.FC = () => {
             ? { id: '', name: '', hex: 'transparent', symbol: '' }
             : selectedBrushColor;
 
-        // Optimize: Don't update if color hasn't changed
         if (oldPixel.color.hex === newColor.hex) return;
 
         newPixels[index] = { ...oldPixel, color: newColor };
@@ -300,7 +210,6 @@ export const BrickMe: React.FC = () => {
     // --- TOUCH GESTURE LOGIC (PINCH ZOOM) ---
     const onTouchStart = (e: React.TouchEvent) => {
         if (e.touches.length === 2) {
-            // Calculate initial distance
             const dist = Math.hypot(
                 e.touches[0].clientX - e.touches[1].clientX,
                 e.touches[0].clientY - e.touches[1].clientY
@@ -318,7 +227,6 @@ export const BrickMe: React.FC = () => {
             );
             if (touchStartDist > 0) {
                 const scale = dist / touchStartDist;
-                // Limit zoom levels
                 const newZoom = Math.max(0.05, Math.min(2.5, startZoom * scale));
                 setZoomLevel(newZoom);
             }
@@ -326,7 +234,7 @@ export const BrickMe: React.FC = () => {
     };
 
     // --- PIXELATION ALGORITHM ---
-    const processBeadPattern = (imgSrc: string, size: number) => {
+    const processBeadPattern = (imgSrc: string, maxDim: number) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
@@ -335,32 +243,28 @@ export const BrickMe: React.FC = () => {
         const img = new Image();
         img.src = imgSrc;
         img.onload = () => {
-            canvas.width = size;
-            canvas.height = size;
+            // Calculate scale based on the maximum dimension allowed
+            const scale = maxDim / Math.max(img.width, img.height);
+            const width = Math.floor(img.width * scale);
+            const height = Math.floor(img.height * scale);
+
+            canvas.width = width;
+            canvas.height = height;
             
             // ENABLE smoothing for better connectivity of thin lines during downscale
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
 
             // Clear canvas to transparent
-            ctx.clearRect(0, 0, size, size);
+            ctx.clearRect(0, 0, width, height);
 
-            const PADDING_FACTOR = 0.90; 
-            const scale = (size * PADDING_FACTOR) / Math.max(img.width, img.height);
-            const drawWidth = Math.floor(img.width * scale);
-            const drawHeight = Math.floor(img.height * scale);
-            
-            const dx = Math.floor((size - drawWidth) / 2);
-            const dy = Math.floor((size - drawHeight) / 2);
-            
-            ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, drawWidth, drawHeight);
+            // Draw image exactly filling the calculated dimensions
+            ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, width, height);
 
-            const imageData = ctx.getImageData(0, 0, size, size);
+            const imageData = ctx.getImageData(0, 0, width, height);
             const data = imageData.data;
             
             // --- STEP 1: SMART CONTRAST SNAP ---
-            // Adjusted logic: Do NOT snap faint light grays (outlines) to white.
-            // Raise threshold to 240 to preserve 230-ish grays which act as boundaries.
             for (let i = 0; i < data.length; i += 4) {
                 const r = data[i];
                 const g = data[i+1];
@@ -369,49 +273,30 @@ export const BrickMe: React.FC = () => {
 
                 if (a < 50) continue; // Skip transparency
 
-                // Check for neutrality (grayscale-ness)
                 const isNeutral = Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && Math.abs(r - b) < 30;
 
-                // Snap Dark Neutrals to pure Black (110 is a safe threshold for outlines)
                 if (isNeutral && r < 120) {
                     data[i] = 0; data[i+1] = 0; data[i+2] = 0;
                 }
-                // Snap Very Light Neutrals to pure White
-                // Increased to 240 to avoid deleting faint outline borders
                 else if (isNeutral && r > 240) {
                     data[i] = 255; data[i+1] = 255; data[i+2] = 255;
                 }
             }
 
             // --- STEP 2: FLOOD FILL BACKGROUND DETECTION ---
-            // Only runs on SOLID opaque pixels. Transparency is already handled by loop skip.
-            // This flood fill is intended to remove the ORIGINAL IMAGE BACKGROUND if it exists.
-            const visited = new Int8Array(size * size); 
+            // Adapted for rectangular grids
+            const visited = new Int8Array(width * height); 
             const queue: number[] = [];
-
-            // Find the first solid pixel to check if it's "Background White"
-            // We search from corners inwards.
-            const getIdx = (x: number, y: number) => y * size + x;
+            const getIdx = (x: number, y: number) => y * width + x;
             
-            // Function to check if a pixel should be treated as "Floodable Background"
-            // If keepWhite is TRUE, we strictly DO NOT flood fill white.
             const matchBgColor = (idx: number) => {
                 const i = idx * 4;
-                // If it's transparent, it's not a color we flood fill (we just ignore it later)
                 if (data[i+3] < 50) return false;
-
-                // If keepWhite is on, we NEVER treat white as background to be removed.
-                if (keepWhite) {
-                    return false;
-                }
-                
-                // Otherwise, check if it's white
+                if (keepWhite) return false;
                 return data[i] > 240 && data[i+1] > 240 && data[i+2] > 240;
             };
 
-            // Seed the queue with corners if they match the background criteria
-            // (e.g., user uploaded a JPG with white BG and didn't check Keep White)
-            const corners = [0, size-1, size*(size-1), size*size-1];
+            const corners = [0, width-1, width*(height-1), width*height-1];
             corners.forEach(c => {
                  if (matchBgColor(c)) {
                      queue.push(c);
@@ -421,20 +306,17 @@ export const BrickMe: React.FC = () => {
 
             while (queue.length > 0) {
                 const idx = queue.pop()!;
-                const x = idx % size;
-                const y = Math.floor(idx / size);
-
+                const x = idx % width;
+                const y = Math.floor(idx / width);
                 const neighbors = [
                     { nx: x + 1, ny: y },
                     { nx: x - 1, ny: y },
                     { nx: x, ny: y + 1 },
                     { nx: x, ny: y - 1 }
                 ];
-
                 for (const { nx, ny } of neighbors) {
-                    if (nx >= 0 && nx < size && ny >= 0 && ny < size) {
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
                         const nIdx = getIdx(nx, ny);
-                        // If it matches criteria and hasn't been visited
                         if (visited[nIdx] === 0 && matchBgColor(nIdx)) {
                             visited[nIdx] = 1;
                             queue.push(nIdx);
@@ -446,32 +328,24 @@ export const BrickMe: React.FC = () => {
             let rawPixels: {x: number, y: number, color: BeadColor}[] = [];
 
             // --- STEP 3: MAPPING ---
-            for (let y = 0; y < size; y++) {
-                for (let x = 0; x < size; x++) {
-                    const idx = y * size + x;
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
                     const i = idx * 4;
                     const r = data[i];
                     const g = data[i + 1];
                     const b = data[i + 2];
                     const a = data[i + 3];
 
-                    // 1. Skip Transparent Padding (Added by padImageToSquare)
                     if (a < 50) continue;
-
-                    // 2. Skip Flood-Filled Background (Original Image BG)
                     if (visited[idx] === 1) continue;
-
-                    // 3. Fallback: If keepWhite is FALSE, still treat random isolated whites as transparent
-                    if (!keepWhite) {
-                        if (r > 240 && g > 240 && b > 240) continue;
-                    }
+                    if (!keepWhite && r > 240 && g > 240 && b > 240) continue;
 
                     const matchedColor = getNearestBeadColor(r, g, b);
                     rawPixels.push({ x, y, color: matchedColor });
                 }
             }
 
-            // 2. Consolidate Colors (Same logic as before)
             if (rawPixels.length > 0) {
                 const tempCounts: Record<string, number> = {};
                 rawPixels.forEach(p => {
@@ -487,27 +361,22 @@ export const BrickMe: React.FC = () => {
                         if (tempCounts[p.color.id] <= threshold) {
                             let bestMajor = p.color;
                             let minMajorDiff = Infinity;
-                            
                             const cr = parseInt(p.color.hex.substring(1, 3), 16);
                             const cg = parseInt(p.color.hex.substring(3, 5), 16);
                             const cb = parseInt(p.color.hex.substring(5, 7), 16);
                             const cLab = rgbToLab(cr, cg, cb);
-
                             majorColors.forEach(majorId => {
                                 const majorBead = BEAD_LABS.find(b => b.id === majorId);
                                 if (!majorBead) return;
-                                
                                 const dL = cLab.l - majorBead.lab.l;
                                 const da = cLab.a - majorBead.lab.a;
                                 const db = cLab.b - majorBead.lab.b;
                                 const dist = (dL*dL) + (da*da) + (db*db);
-
                                 if (dist < minMajorDiff) {
                                     minMajorDiff = dist;
                                     bestMajor = majorBead;
                                 }
                             });
-
                             if (minMajorDiff < 400) {
                                 return { ...p, color: bestMajor };
                             }
@@ -519,13 +388,13 @@ export const BrickMe: React.FC = () => {
 
             // --- AUTO CROP / TRIM LOGIC ---
             if (rawPixels.length === 0) {
-                setPattern({ width: size, height: size, pixels: [], counts: {} });
+                setPattern({ width: width, height: height, pixels: [], counts: {} });
                 setIsPixelating(false);
                 setStatusMsg('没有检测到有效像素');
                 return;
             }
 
-            let minX = size, maxX = 0, minY = size, maxY = 0;
+            let minX = width, maxX = 0, minY = height, maxY = 0;
             rawPixels.forEach(p => {
                 if (p.x < minX) minX = p.x;
                 if (p.x > maxX) maxX = p.x;
@@ -535,15 +404,12 @@ export const BrickMe: React.FC = () => {
 
             const trimmedWidth = maxX - minX + 1;
             const trimmedHeight = maxY - minY + 1;
-
             const finalCounts: Record<string, number> = {};
-            
             const fullGrid: (BeadColor | null)[] = new Array(trimmedWidth * trimmedHeight).fill(null);
 
             rawPixels.forEach(p => {
                 const newX = p.x - minX;
                 const newY = p.y - minY;
-                
                 finalCounts[p.color.id] = (finalCounts[p.color.id] || 0) + 1;
                 fullGrid[newY * trimmedWidth + newX] = p.color;
             });
@@ -607,13 +473,12 @@ export const BrickMe: React.FC = () => {
                 }
                 PX_PER_CELL = Math.max(PX_PER_CELL, 10);
 
-                const RULER_SIZE = PX_PER_CELL * 1.5; // Bigger space for rulers
+                const RULER_SIZE = PX_PER_CELL * 1.5; 
                 const PADDING = 40;
                 
                 const gridW = pattern.width * PX_PER_CELL;
                 const gridH = pattern.height * PX_PER_CELL;
                 
-                // --- LEGEND LAYOUT ---
                 const SWATCH_SIZE = 90;
                 const TEXT_HEIGHT_BELOW = 50;
                 const GROUP_W = 100;
@@ -622,7 +487,6 @@ export const BrickMe: React.FC = () => {
                 const GAP_Y = 40;
                 const LEGEND_PADDING_TOP = 100;
 
-                // Total size includes rulers on BOTH sides + padding
                 const totalW = Math.max(RULER_SIZE + gridW + RULER_SIZE + (PADDING * 2), 800);
                 const legendAreaW = totalW - (PADDING * 2);
                 const legendCols = Math.floor(legendAreaW / (GROUP_W + GAP_X));
@@ -647,33 +511,25 @@ export const BrickMe: React.FC = () => {
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 
-                // RULER RENDERING
                 ctx.fillStyle = '#000000'; 
-                // Much larger font for rulers: 80% of cell size
                 ctx.font = `bold ${PX_PER_CELL * 0.8}px sans-serif`;
                 
-                // Columns (Top & Bottom)
                 for (let x = 0; x < pattern.width; x++) {
                     const num = x + 1;
-                    if (num % 5 === 0) { // Only show every 5th number
+                    if (num % 5 === 0) {
                         const cx = startX + (x * PX_PER_CELL) + (PX_PER_CELL/2);
                         const label = (num / 5).toString();
-                        // Top
                         ctx.fillText(label, cx, PADDING + (RULER_SIZE/2));
-                        // Bottom
                         ctx.fillText(label, cx, startY + gridH + (RULER_SIZE/2));
                     }
                 }
                 
-                // Rows (Left & Right)
                 for (let y = 0; y < pattern.height; y++) {
                     const num = y + 1;
-                    if (num % 5 === 0) { // Only show every 5th number
+                    if (num % 5 === 0) {
                         const cy = startY + (y * PX_PER_CELL) + (PX_PER_CELL/2);
                         const label = (num / 5).toString();
-                        // Left
                         ctx.fillText(label, PADDING + (RULER_SIZE/2), cy);
-                        // Right
                         ctx.fillText(label, startX + gridW + (RULER_SIZE/2), cy);
                     }
                 }
@@ -740,7 +596,7 @@ export const BrickMe: React.FC = () => {
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#0f172a';
                 ctx.font = 'bold 48px sans-serif'; 
-                ctx.fillText(`- 调色板: BrickGift V1 -`, totalW / 2, legendStartY - 40);
+                ctx.fillText(`- 调色板: 拼豆礼坊 V1 -`, totalW / 2, legendStartY - 40);
 
                 const counts = Object.entries(pattern.counts).sort(([, a], [, b]) => (b as number) - (a as number));
                 
@@ -783,7 +639,7 @@ export const BrickMe: React.FC = () => {
                     ctx.fillText(`${count}`, groupX, swatchY + SWATCH_SIZE + 10);
                 });
                 
-                const finalName = projectName.trim() || `brick-gift-${pattern.width}x${pattern.height}`;
+                const finalName = projectName.trim() || `bead-gift-${pattern.width}x${pattern.height}`;
 
                 if (format === 'png') {
                     const link = document.createElement('a');
@@ -827,7 +683,35 @@ export const BrickMe: React.FC = () => {
     };
 
     const cellSize = BASE_CELL_SIZE * zoomLevel;
-    const currentPreview = processedImage || originalImage;
+
+    // Estimate Calculation for UI
+    let estimationUI = null;
+    if (imageDimensions) {
+        // Calculate the scale that processBeadPattern will use (no padding now)
+        const scale = boardSize / Math.max(imageDimensions.width, imageDimensions.height);
+        const estW = Math.round(imageDimensions.width * scale);
+        const estH = Math.round(imageDimensions.height * scale);
+        
+        // Calculate boards (52x52)
+        const cols = Math.ceil(estW / 52);
+        const rows = Math.ceil(estH / 52);
+        const totalBoards = cols * rows;
+
+        estimationUI = (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs mb-4">
+                <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-indigo-800">预计像素尺寸:</span>
+                    <span className="font-mono text-indigo-600">{estW} x {estH} px</span>
+                </div>
+                <div className="flex justify-between items-center">
+                    <span className="font-bold text-indigo-800">需用小板 (52x52):</span>
+                    <span className="font-mono font-bold text-indigo-600 bg-white px-1.5 py-0.5 rounded shadow-sm">
+                        {totalBoards} 块 ({cols}x{rows})
+                    </span>
+                </div>
+            </div>
+        );
+    }
 
     // Helper classes for tab visibility
     const showSettings = activeTab === 'settings';
@@ -864,116 +748,62 @@ export const BrickMe: React.FC = () => {
                 {/* 2. STYLE & PROCESS */}
                 {originalImage && (
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 animate-fade-in">
-                        <h2 className="text-lg font-black text-slate-800 mb-4">2. 风格与尺寸</h2>
+                        <h2 className="text-lg font-black text-slate-800 mb-4">2. 调整与生成</h2>
                         
                         <div className="space-y-4">
-                            {/* Style Mode */}
-                            <div className="grid grid-cols-3 gap-2">
-                                {[
-                                    { id: 'original', label: '原图直出' },
-                                    { id: 'chibi', label: '卡通头像' },
-                                    { id: 'icon', label: '扁平图标' }
-                                ].map((mode) => (
-                                    <button
-                                        key={mode.id}
-                                        onClick={() => { 
-                                            setStyleMode(mode.id as any); 
-                                            if(mode.id === 'original') setProcessedImage(originalImage);
-                                            else setProcessedImage(null);
-                                        }}
-                                        className={`py-2 px-1 rounded-lg text-xs font-bold border-2 transition-all ${styleMode === mode.id ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}
-                                    >
-                                        {mode.label}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {/* Prompt */}
-                            {styleMode !== 'original' && (
-                                <div className="animate-fade-in">
-                                    <textarea
-                                        value={customPrompt}
-                                        onChange={(e) => setCustomPrompt(e.target.value)}
-                                        placeholder="例如：粉色头发，戴眼镜..."
-                                        className="w-full border-2 border-slate-200 rounded-lg p-2 text-sm focus:border-indigo-500 outline-none h-16 resize-none bg-slate-50"
-                                    />
-                                    
-                                    <div className="mt-2">
-                                        {!processedImage ? (
-                                            <button 
-                                                onClick={handleGenerateAI}
-                                                disabled={isGeneratingAI}
-                                                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
-                                            >
-                                                {isGeneratingAI ? 'AI 绘制中...' : '生成 AI 效果图'}
-                                            </button>
-                                        ) : (
-                                            <div className="relative rounded-lg overflow-hidden border border-slate-200">
-                                                <img src={processedImage} alt="AI Result" className="w-full h-auto" />
-                                                <div className="absolute bottom-1 right-1 flex gap-1">
-                                                     <button onClick={() => setShowRefineModal(true)} className="bg-white/90 text-slate-700 px-2 py-1 rounded text-xs font-bold shadow-sm hover:bg-white">修改</button>
-                                                     <button onClick={() => setProcessedImage(null)} className="bg-white/90 text-red-600 px-2 py-1 rounded text-xs font-bold shadow-sm hover:bg-white">重试</button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            <hr className="border-slate-100" />
                             
                             {/* Size Slider - UPDATED with Input */}
-                            {currentPreview && (
-                                <div className="space-y-4">
-                                    <div>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <label className="text-xs font-bold text-slate-400">最大尺寸</label>
-                                            <div className="flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-1">
-                                                <input 
-                                                    type="number"
-                                                    min="10"
-                                                    max="300"
-                                                    value={boardSize}
-                                                    onChange={(e) => {
-                                                        const val = parseInt(e.target.value);
-                                                        if (!isNaN(val)) setBoardSize(val);
-                                                    }}
-                                                    className="w-12 text-right bg-transparent text-indigo-600 font-mono font-bold text-sm outline-none border-b border-transparent focus:border-indigo-400"
-                                                />
-                                                <span className="text-xs text-slate-400 font-bold">px</span>
-                                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs font-bold text-slate-400">最大尺寸 (像素/豆豆)</label>
+                                        <div className="flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-1">
+                                            <input 
+                                                type="number"
+                                                min="10"
+                                                max="300"
+                                                value={boardSize}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value);
+                                                    if (!isNaN(val)) setBoardSize(val);
+                                                }}
+                                                className="w-12 text-right bg-transparent text-indigo-600 font-mono font-bold text-sm outline-none border-b border-transparent focus:border-indigo-400"
+                                            />
+                                            <span className="text-xs text-slate-400 font-bold">px</span>
                                         </div>
-                                        <input 
-                                            type="range"
-                                            min="20" 
-                                            max="300"
-                                            step="1"
-                                            value={boardSize}
-                                            onChange={(e) => setBoardSize(parseInt(e.target.value))}
-                                            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                                        />
                                     </div>
-                                    
-                                    {/* White Bead Toggle */}
-                                    <div className="flex items-center gap-2">
-                                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                                            <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${keepWhite ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${keepWhite ? 'translate-x-3' : ''}`}></div>
-                                            </div>
-                                            <input type="checkbox" checked={keepWhite} onChange={(e) => setKeepWhite(e.target.checked)} className="hidden" />
-                                            <span className="text-xs font-bold text-slate-500">保留白色豆子</span>
-                                        </label>
-                                    </div>
-
-                                    <button 
-                                        onClick={handleGeneratePattern}
-                                        disabled={isPixelating}
-                                        className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-md disabled:opacity-50"
-                                    >
-                                        {isPixelating ? '计算中...' : '生成图纸 🧩'}
-                                    </button>
+                                    <input 
+                                        type="range"
+                                        min="20" 
+                                        max="300"
+                                        step="1"
+                                        value={boardSize}
+                                        onChange={(e) => setBoardSize(parseInt(e.target.value))}
+                                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 mb-3"
+                                    />
                                 </div>
-                            )}
+                                
+                                {estimationUI}
+
+                                {/* White Bead Toggle */}
+                                <div className="flex items-center gap-2">
+                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                        <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${keepWhite ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${keepWhite ? 'translate-x-3' : ''}`}></div>
+                                        </div>
+                                        <input type="checkbox" checked={keepWhite} onChange={(e) => setKeepWhite(e.target.checked)} className="hidden" />
+                                        <span className="text-xs font-bold text-slate-500">保留白色豆子</span>
+                                    </label>
+                                </div>
+
+                                <button 
+                                    onClick={handleGeneratePattern}
+                                    disabled={isPixelating}
+                                    className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-md disabled:opacity-50"
+                                >
+                                    {isPixelating ? '计算中...' : '生成图纸 🧩'}
+                                </button>
+                            </div>
                         </div>
                         {statusMsg && <div className="text-center text-xs font-bold text-indigo-500 mt-2">{statusMsg}</div>}
                     </div>

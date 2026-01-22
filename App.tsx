@@ -14,11 +14,11 @@ const App: React.FC = () => {
       >
         {/* Bead Logo */}
         <div className="flex gap-0.5">
-            <div className="w-4 h-4 rounded-sm bg-red-500 shadow-sm"></div>
-            <div className="w-4 h-4 rounded-sm bg-blue-500 shadow-sm"></div>
-            <div className="w-4 h-4 rounded-sm bg-yellow-400 shadow-sm"></div>
+            <div className="w-4 h-4 rounded-full bg-red-500 shadow-sm"></div>
+            <div className="w-4 h-4 rounded-full bg-blue-500 shadow-sm"></div>
+            <div className="w-4 h-4 rounded-full bg-yellow-400 shadow-sm"></div>
         </div>
-        <h1 className="text-xl font-black text-slate-800 tracking-tight ml-2">积木<span className="text-blue-600">礼坊</span></h1>
+        <h1 className="text-xl font-black text-slate-800 tracking-tight ml-2">拼豆<span className="text-blue-600">礼坊</span></h1>
       </div>
       
       {view !== ViewMode.LANDING && (
@@ -39,39 +39,39 @@ const App: React.FC = () => {
 
   // Landing Page Component
   const Landing = () => (
-    <div className="max-w-5xl mx-auto px-6 py-12">
-        <div className="text-center mb-16">
-            <h1 className="text-5xl font-black text-slate-900 mb-6">像素级 <span className="text-blue-600">美好记忆</span></h1>
-            <p className="text-xl text-slate-500 max-w-2xl mx-auto">
-                将您喜爱的照片转化为专业的积木拼豆图纸。
-                AI 智能优化，生成清晰易读的施工图。
-            </p>
-        </div>
+    <div className="h-full flex flex-col items-center justify-center max-w-5xl mx-auto px-6 py-4">
+        <div className="flex-1 flex flex-col justify-center w-full">
+            <div className="text-center mb-10">
+                <h1 className="text-4xl md:text-6xl font-black text-slate-900 mb-6">像素级 <span className="text-blue-600">美好记忆</span></h1>
+                <p className="text-lg md:text-xl text-slate-500 max-w-2xl mx-auto">
+                    将您喜爱的照片转化为专业的拼豆图纸。
+                    简单几步，生成清晰易读的施工图。
+                </p>
+            </div>
 
-        <div className="flex justify-center max-w-3xl mx-auto">
-            {/* Card 1 */}
-            <div 
-                onClick={() => setView(ViewMode.BEADME)}
-                className="group cursor-pointer bg-white rounded-3xl p-10 border-2 border-slate-100 hover:border-blue-500 hover:shadow-xl transition-all hover:-translate-y-1 w-full md:max-w-md text-center"
-            >
-                <div className="w-20 h-20 mx-auto bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-6 text-4xl">
-                    🧩
-                </div>
-                <h3 className="text-2xl font-bold text-slate-800 mb-2">开始设计图纸</h3>
-                <p className="text-slate-500">上传照片，Gemini AI 自动为您生成卡通像素风格，并导出含色号的详细图纸。</p>
-                <div className="mt-8 flex items-center justify-center gap-2 text-blue-600 font-bold text-lg bg-blue-50 py-3 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    立即制作 <span>→</span>
+            <div className="flex justify-center w-full">
+                {/* Card 1 */}
+                <div 
+                    onClick={() => setView(ViewMode.BEADME)}
+                    className="group cursor-pointer bg-white rounded-3xl p-8 border-2 border-slate-100 hover:border-blue-500 hover:shadow-xl transition-all hover:-translate-y-1 w-full md:max-w-md text-center"
+                >
+                    <div className="w-16 h-16 mx-auto bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-6 text-3xl">
+                        🧩
+                    </div>
+                    <h3 className="text-2xl font-bold text-slate-800 mb-2">开始设计图纸</h3>
+                    <p className="text-slate-500 text-sm">上传照片，自动生成像素风格并导出图纸。</p>
+                    <div className="mt-8 flex items-center justify-center gap-2 text-blue-600 font-bold text-lg bg-blue-50 py-3 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        立即制作 <span>→</span>
+                    </div>
                 </div>
             </div>
         </div>
         
         {/* Footer / Trust */}
-        <div className="mt-20 text-center border-t border-slate-100 pt-10">
-            <p className="text-sm text-slate-400 font-bold uppercase tracking-widest mb-6">完美适配色系</p>
-            <div className="flex justify-center gap-8 opacity-50 grayscale hover:grayscale-0 transition-all">
-                <span className="font-black text-xl text-slate-600">Perler®</span>
-                <span className="font-black text-xl text-slate-600">Hama®</span>
-                <span className="font-black text-xl text-slate-600">Artkal®</span>
+        <div className="mt-4 text-center border-t border-slate-100 pt-8 pb-8 w-full max-w-2xl shrink-0">
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-4">完美适配色系</p>
+            <div className="flex justify-center gap-8 opacity-60">
+                <span className="font-black text-2xl text-slate-700 tracking-widest">MARD®</span>
             </div>
         </div>
     </div>

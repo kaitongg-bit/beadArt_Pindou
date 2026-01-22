@@ -1,6 +1,6 @@
 {
   "name": "BeadGift",
-  "description": "Convert photos into Perler Bead patterns using Gemini AI.",
+  "description": "Convert photos into Perler Bead patterns.",
   "requestFramePermissions": [
     "camera"
   ]
