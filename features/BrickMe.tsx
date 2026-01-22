@@ -138,6 +138,10 @@ export const BrickMe: React.FC = () => {
     const [customPrompt, setCustomPrompt] = useState('');
     const [projectName, setProjectName] = useState('MyPattern');
     
+    // Mobile UX State
+    const [activeTab, setActiveTab] = useState<'settings' | 'preview' | 'palette'>('settings');
+    const [showMobilePalette, setShowMobilePalette] = useState(false); // Bottom sheet state
+    
     // Default to STANDARD board size (52)
     const [boardSize, setBoardSize] = useState<number>(32); 
     const [isGeneratingAI, setIsGeneratingAI] = useState(false);
@@ -178,6 +182,7 @@ export const BrickMe: React.FC = () => {
         setCustomPrompt(''); 
         setStyleMode('chibi'); 
         setIsEditMode(false);
+        setActiveTab('settings'); // Stay on settings to adjust
         
         const reader = new FileReader();
         reader.onload = async (event) => {
@@ -227,6 +232,8 @@ export const BrickMe: React.FC = () => {
         
         setTimeout(() => {
             processBeadPattern(source, boardSize);
+            // Switch tab to preview for better UX
+            setActiveTab('preview');
         }, 100);
     };
 
@@ -282,6 +289,7 @@ export const BrickMe: React.FC = () => {
         setSelectedBrushColor(color);
         setActiveTool('paint');
         if (!isEditMode) setIsEditMode(true);
+        setShowMobilePalette(false); // Close sheet on selection
     };
 
     // --- PIXELATION ALGORITHM ---
@@ -788,12 +796,18 @@ export const BrickMe: React.FC = () => {
     const cellSize = BASE_CELL_SIZE * zoomLevel;
     const currentPreview = processedImage || originalImage;
 
+    // Helper classes for tab visibility
+    const showSettings = activeTab === 'settings';
+    const showPreview = activeTab === 'preview';
+    const showPalette = activeTab === 'palette';
+
     return (
-        <div className="flex flex-col lg:flex-row gap-6 relative h-auto lg:h-full print:h-auto print:block">
+        <div className="flex flex-col lg:flex-row gap-6 relative h-auto lg:h-full print:h-auto print:block pb-24 lg:pb-0">
             <canvas ref={canvasRef} className="hidden" />
 
             {/* --- LEFT PANEL: CONTROLS --- */}
-            <div className="w-full lg:w-1/4 flex flex-col gap-6 no-print lg:h-full lg:overflow-y-auto shrink-0 pb-10">
+            {/* On Mobile: Only show if activeTab is 'settings'. On Desktop: Always show (lg:flex). */}
+            <div className={`w-full lg:w-1/4 flex-col gap-6 no-print lg:h-full lg:overflow-y-auto shrink-0 pb-10 lg:flex ${showSettings ? 'flex' : 'hidden'}`}>
                 
                 {/* 1. UPLOAD */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -934,10 +948,12 @@ export const BrickMe: React.FC = () => {
             </div>
 
             {/* --- RIGHT PANEL: PREVIEW & RESULTS --- */}
-            <div className="flex-1 flex flex-col min-w-0 gap-4 min-h-[600px] lg:h-full print:h-auto print:block">
+            {/* Wrapper: On Mobile, only show if preview OR palette is active. On Desktop, always show. */}
+            <div className={`flex-1 flex-col min-w-0 gap-4 min-h-[600px] lg:h-full print:h-auto print:block ${(showPreview || showPalette) ? 'flex' : 'hidden'} lg:flex`}>
                 
-                {/* --- VIEWPORT --- */}
-                <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative print:shadow-none print:border-none print:overflow-visible print:h-auto">
+                {/* --- VIEWPORT (PREVIEW TAB) --- */}
+                {/* Mobile: Show only if activeTab is 'preview'. Desktop: Always show. */}
+                <div className={`flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex-col overflow-hidden relative print:shadow-none print:border-none print:overflow-visible print:h-auto ${showPreview ? 'flex' : 'hidden'} lg:flex`}>
                     
                     <div className="border-b border-slate-100 p-4 flex flex-wrap gap-4 justify-between items-center bg-slate-50 no-print z-10 relative shrink-0">
                          <div className="flex items-center gap-4 flex-wrap">
@@ -968,7 +984,11 @@ export const BrickMe: React.FC = () => {
                                 {/* Edit Mode Toggle */}
                                 {pattern && (
                                     <button
-                                        onClick={() => setIsEditMode(!isEditMode)}
+                                        onClick={() => {
+                                            const newMode = !isEditMode;
+                                            setIsEditMode(newMode);
+                                            if (newMode) setActiveTab('preview'); // Force preview tab when editing
+                                        }}
                                         className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${isEditMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
                                     >
                                         <span>{isEditMode ? '🎨 正在编辑' : '✏️ 修改豆豆'}</span>
@@ -1008,9 +1028,9 @@ export const BrickMe: React.FC = () => {
 
                     <div ref={viewportRef} className="flex-1 relative overflow-auto bg-slate-100 print:overflow-visible print:bg-white print:h-auto">
                         
-                        {/* --- FLOATING EDIT TOOLBAR --- */}
+                        {/* --- FLOATING EDIT TOOLBAR (DESKTOP ONLY) --- */}
                         {isEditMode && pattern && (
-                            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-white rounded-full shadow-lg border border-slate-200 p-1.5 flex gap-2 animate-float sticky mt-4">
+                            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-white rounded-full shadow-lg border border-slate-200 p-1.5 gap-2 animate-float sticky mt-4 hidden lg:flex">
                                 <button
                                     onClick={() => setActiveTool('paint')}
                                     className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${activeTool === 'paint' ? 'border-indigo-500 scale-110' : 'border-transparent hover:bg-slate-100'}`}
@@ -1139,9 +1159,10 @@ export const BrickMe: React.FC = () => {
                     </div>
                 </div>
 
-                {/* --- BOTTOM: MATERIALS / PALETTE --- */}
+                {/* --- BOTTOM: MATERIALS / PALETTE (PALETTE TAB) --- */}
+                {/* Mobile: Show only if activeTab is 'palette'. Desktop: Always show (if pattern exists). */}
                 {pattern && (
-                    <div className="h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col shrink-0 no-print">
+                    <div className={`h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex-col shrink-0 no-print lg:flex ${showPalette ? 'flex h-auto flex-1' : 'hidden'}`}>
                         <div className={`px-4 py-2 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-center ${isEditMode ? 'bg-indigo-50' : ''}`}>
                              <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
                                 {isEditMode ? '🎨 调色板 (点击下方选择画笔)' : '材料清单'}
@@ -1193,6 +1214,146 @@ export const BrickMe: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {/* --- MOBILE TAB BAR (STANDARD) --- */}
+            {/* HIDE when in Edit Mode */}
+            <div className={`fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 justify-around items-center h-16 lg:hidden z-40 shadow-lg safe-area-bottom ${isEditMode ? 'hidden' : 'flex'}`}>
+                 <button 
+                    onClick={() => setActiveTab('settings')}
+                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'settings' ? 'text-indigo-600' : 'text-slate-400'}`}
+                 >
+                    <span className="text-xl">🎛️</span>
+                    <span className="text-[10px] font-bold">设置</span>
+                 </button>
+                 <button 
+                    onClick={() => setActiveTab('preview')}
+                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'preview' ? 'text-indigo-600' : 'text-slate-400'}`}
+                 >
+                    <span className="text-xl">🧩</span>
+                    <span className="text-[10px] font-bold">预览</span>
+                 </button>
+                 <button 
+                    onClick={() => setActiveTab('palette')}
+                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'palette' ? 'text-indigo-600' : 'text-slate-400'}`}
+                 >
+                    <span className="text-xl">🎨</span>
+                    <span className="text-[10px] font-bold">清单</span>
+                 </button>
+            </div>
+
+            {/* --- MOBILE EDIT TOOLBAR & BOTTOM SHEET --- */}
+            {isEditMode && pattern && (
+                <>
+                    {/* Fixed Edit Toolbar */}
+                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-between items-center h-16 px-4 lg:hidden z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] safe-area-bottom">
+                         <div className="flex gap-4 items-center">
+                             {/* Eraser */}
+                             <button
+                                onClick={() => setActiveTool('eraser')}
+                                className={`flex flex-col items-center justify-center px-2 ${activeTool === 'eraser' ? 'text-red-500' : 'text-slate-400'}`}
+                             >
+                                <span className="text-xl">🧼</span>
+                                <span className="text-[10px] font-bold">橡皮</span>
+                             </button>
+
+                             <div className="w-[1px] h-8 bg-slate-200"></div>
+
+                             {/* Current Color / Open Palette */}
+                             <button
+                                onClick={() => setShowMobilePalette(true)}
+                                className="flex items-center gap-3 bg-slate-100 rounded-full pl-1 pr-4 py-1 border border-slate-200"
+                             >
+                                <div 
+                                    className="w-8 h-8 rounded-full border border-black/10 shadow-sm"
+                                    style={{ backgroundColor: selectedBrushColor.hex }}
+                                ></div>
+                                <div className="flex flex-col items-start">
+                                    <span className="text-[10px] font-bold text-slate-400">当前颜色</span>
+                                    <span className="text-xs font-black text-slate-700">{selectedBrushColor.id} ▾</span>
+                                </div>
+                             </button>
+                             
+                             <button 
+                                onClick={() => setShowColorPicker(true)}
+                                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 border border-slate-200 bg-white"
+                             >
+                                +
+                             </button>
+                         </div>
+
+                         <button 
+                            onClick={() => setIsEditMode(false)}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold"
+                         >
+                            完成
+                         </button>
+                    </div>
+
+                    {/* Bottom Sheet Palette */}
+                    <div 
+                        className={`fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 transition-transform duration-300 ease-out shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.3)] flex flex-col max-h-[60vh] lg:hidden ${showMobilePalette ? 'translate-y-0' : 'translate-y-full'}`}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="p-4 border-b border-slate-100 flex justify-between items-center shrink-0">
+                            <h3 className="font-black text-slate-700">选择颜色</h3>
+                            <button onClick={() => setShowMobilePalette(false)} className="text-slate-400 p-2 text-xl">&times;</button>
+                        </div>
+                        
+                        <div className="overflow-y-auto p-4 pb-8">
+                             <div className="flex flex-wrap gap-3 justify-center">
+                                {Object.entries(pattern.counts)
+                                    .sort(([,a], [,b]) => (b as number) - (a as number))
+                                    .map(([colorId, count]) => {
+                                        const color = BEAD_COLORS.find(c => c.id === colorId);
+                                        if (!color) return null;
+                                        
+                                        const r = parseInt(color.hex.slice(1,3), 16);
+                                        const g = parseInt(color.hex.slice(3,5), 16);
+                                        const b = parseInt(color.hex.slice(5,7), 16);
+                                        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                                        const textCol = brightness > 140 ? '#000' : '#FFF';
+                                        
+                                        const isSelected = selectedBrushColor.id === color.id;
+
+                                        return (
+                                            <div 
+                                                key={colorId} 
+                                                onClick={() => selectColor(color)}
+                                                className={`
+                                                    flex items-center gap-2 pr-3 pl-1 py-1 rounded-full border transition-all cursor-pointer
+                                                    ${isSelected ? 'bg-indigo-600 border-indigo-600 ring-2 ring-indigo-200 text-white' : 'bg-slate-50 border-slate-100'}
+                                                `}
+                                            >
+                                                <div 
+                                                    className="w-8 h-8 rounded-full border border-black/10 shadow-sm flex items-center justify-center text-[10px] font-bold shrink-0"
+                                                    style={{ backgroundColor: color.hex, color: textCol }}
+                                                >
+                                                    {color.symbol}
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-700'}`}>{color.id}</span>
+                                                    <span className={`text-[10px] font-bold ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>x{count}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                }
+                                {/* Add New Color Button in Sheet */}
+                                <button 
+                                    onClick={() => { setShowMobilePalette(false); setShowColorPicker(true); }}
+                                    className="flex items-center gap-2 px-4 py-1 rounded-full border border-dashed border-slate-300 text-slate-400 font-bold text-xs hover:bg-slate-50"
+                                >
+                                    + 添加新色
+                                </button>
+                             </div>
+                        </div>
+                    </div>
+                    {/* Backdrop for sheet */}
+                    {showMobilePalette && (
+                        <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setShowMobilePalette(false)}></div>
+                    )}
+                </>
+            )}
 
             {/* --- REFINE MODAL --- */}
             {showRefineModal && (
