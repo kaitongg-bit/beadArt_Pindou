@@ -85,6 +85,10 @@ export const BrickMe: React.FC = () => {
     // --- WORKFLOW STATES ---
     const [projectName, setProjectName] = useState('MyPattern');
     
+    // Image Adjustments
+    const [imgBrightness, setImgBrightness] = useState(100);
+    const [imgSaturation, setImgSaturation] = useState(100);
+
     // Mobile UX State
     const [activeTab, setActiveTab] = useState<'settings' | 'preview' | 'palette'>('settings');
     const [showMobilePalette, setShowMobilePalette] = useState(false); // Bottom sheet state
@@ -132,6 +136,10 @@ export const BrickMe: React.FC = () => {
         setIsEditMode(false);
         setActiveTab('settings'); // Stay on settings to adjust
         
+        // Reset adjustments
+        setImgBrightness(100);
+        setImgSaturation(100);
+
         const reader = new FileReader();
         reader.onload = async (event) => {
             const rawBase64 = event.target?.result as string;
@@ -258,8 +266,14 @@ export const BrickMe: React.FC = () => {
             // Clear canvas to transparent
             ctx.clearRect(0, 0, width, height);
 
+            // Apply Image Adjustments
+            ctx.filter = `brightness(${imgBrightness}%) saturate(${imgSaturation}%)`;
+
             // Draw image exactly filling the calculated dimensions
             ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, width, height);
+
+            // Reset filter
+            ctx.filter = 'none';
 
             const imageData = ctx.getImageData(0, 0, width, height);
             const data = imageData.data;
@@ -734,7 +748,12 @@ export const BrickMe: React.FC = () => {
                         className="cursor-pointer border-4 border-dashed border-indigo-100 rounded-xl aspect-square flex flex-col items-center justify-center hover:bg-indigo-50 transition-colors relative overflow-hidden group"
                     >
                          {originalImage ? (
-                             <img src={originalImage} className="w-full h-full object-contain bg-slate-50 p-2" alt="Original" />
+                             <img 
+                                src={originalImage} 
+                                className="w-full h-full object-contain bg-slate-50 p-2 transition-all duration-300" 
+                                alt="Original" 
+                                style={{ filter: `brightness(${imgBrightness}%) saturate(${imgSaturation}%)` }}
+                             />
                          ) : (
                              <div className="text-center p-4">
                                  <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">📸</div>
@@ -751,6 +770,43 @@ export const BrickMe: React.FC = () => {
                         <h2 className="text-lg font-black text-slate-800 mb-4">2. 调整与生成</h2>
                         
                         <div className="space-y-4">
+                            
+                            {/* NEW: Image Adjustments */}
+                            <div className="bg-slate-50 p-4 rounded-xl space-y-3">
+                                 <div className="flex items-center justify-between">
+                                    <label className="text-xs font-bold text-slate-500">图片预处理</label>
+                                    <button 
+                                        onClick={() => { setImgBrightness(100); setImgSaturation(100); }}
+                                        className="text-[10px] text-blue-500 font-bold hover:underline"
+                                    >
+                                        重置
+                                    </button>
+                                 </div>
+                                 
+                                 {/* Brightness */}
+                                 <div className="flex items-center gap-3">
+                                    <span className="text-xs font-bold text-slate-400 w-8">亮度</span>
+                                    <input 
+                                        type="range" min="50" max="150" step="5" 
+                                        value={imgBrightness}
+                                        onChange={(e) => setImgBrightness(Number(e.target.value))}
+                                        className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                    />
+                                    <span className="text-xs font-mono text-slate-500 w-8 text-right">{imgBrightness}%</span>
+                                 </div>
+
+                                 {/* Saturation */}
+                                 <div className="flex items-center gap-3">
+                                    <span className="text-xs font-bold text-slate-400 w-8">鲜艳</span>
+                                    <input 
+                                        type="range" min="0" max="200" step="5" 
+                                        value={imgSaturation}
+                                        onChange={(e) => setImgSaturation(Number(e.target.value))}
+                                        className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                    />
+                                    <span className="text-xs font-mono text-slate-500 w-8 text-right">{imgSaturation}%</span>
+                                 </div>
+                            </div>
                             
                             {/* Size Slider - UPDATED with Input */}
                             <div className="space-y-4">
