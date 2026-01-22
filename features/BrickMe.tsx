@@ -155,6 +155,12 @@ export const BrickMe: React.FC = () => {
     const [refinePrompt, setRefinePrompt] = useState('');
     const [isRefining, setIsRefining] = useState(false);
 
+    // --- EDIT MODE STATES ---
+    const [isEditMode, setIsEditMode] = useState(false);
+    const [activeTool, setActiveTool] = useState<'paint' | 'eraser'>('paint');
+    const [selectedBrushColor, setSelectedBrushColor] = useState<BeadColor>(BEAD_COLORS[6]); // Default some color
+    const [showColorPicker, setShowColorPicker] = useState(false);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
@@ -171,6 +177,7 @@ export const BrickMe: React.FC = () => {
         setProcessedImage(null);
         setCustomPrompt(''); 
         setStyleMode('chibi'); 
+        setIsEditMode(false);
         
         const reader = new FileReader();
         reader.onload = async (event) => {
@@ -216,6 +223,7 @@ export const BrickMe: React.FC = () => {
 
         setIsPixelating(true);
         setStatusMsg('正在量化色彩...');
+        setIsEditMode(false);
         
         setTimeout(() => {
             processBeadPattern(source, boardSize);
@@ -238,6 +246,42 @@ export const BrickMe: React.FC = () => {
         } finally {
             setIsRefining(false);
         }
+    };
+
+    // --- PIXEL EDITING LOGIC ---
+    const handlePixelClick = (index: number) => {
+        if (!pattern || !isEditMode) return;
+
+        const newPixels = [...pattern.pixels];
+        const oldPixel = newPixels[index];
+        const newColor = activeTool === 'eraser' 
+            ? { id: '', name: '', hex: 'transparent', symbol: '' }
+            : selectedBrushColor;
+
+        // Optimize: Don't update if color hasn't changed
+        if (oldPixel.color.hex === newColor.hex) return;
+
+        newPixels[index] = { ...oldPixel, color: newColor };
+
+        // Re-calculate counts
+        const newCounts: Record<string, number> = {};
+        newPixels.forEach(p => {
+            if (p.color.hex !== 'transparent') {
+                newCounts[p.color.id] = (newCounts[p.color.id] || 0) + 1;
+            }
+        });
+
+        setPattern({
+            ...pattern,
+            pixels: newPixels,
+            counts: newCounts
+        });
+    };
+
+    const selectColor = (color: BeadColor) => {
+        setSelectedBrushColor(color);
+        setActiveTool('paint');
+        if (!isEditMode) setIsEditMode(true);
     };
 
     // --- PIXELATION ALGORITHM ---
@@ -478,6 +522,12 @@ export const BrickMe: React.FC = () => {
 
             setIsPixelating(false);
             setStatusMsg('');
+            // Set default tool color to the most prominent color
+            const mostProminent = Object.entries(finalCounts).sort(([,a], [,b]) => b-a)[0];
+            if (mostProminent) {
+                const c = BEAD_COLORS.find(bc => bc.id === mostProminent[0]);
+                if (c) setSelectedBrushColor(c);
+            }
             setTimeout(handleAutoFit, 100);
         };
     };
@@ -904,14 +954,27 @@ export const BrickMe: React.FC = () => {
                                     className="w-24 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                                 />
                              </div>
-                             {/* Symbol Visibility Toggle */}
-                             <label className="flex items-center gap-2 cursor-pointer select-none">
-                                 <div className={`w-10 h-6 rounded-full p-1 transition-colors ${showSymbols ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                     <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showSymbols ? 'translate-x-4' : ''}`}></div>
-                                 </div>
-                                 <input type="checkbox" checked={showSymbols} onChange={(e) => setShowSymbols(e.target.checked)} className="hidden" />
-                                 <span className="text-xs font-bold text-slate-500">显示色号</span>
-                             </label>
+                             
+                             <div className="flex items-center gap-4">
+                                {/* Symbol Visibility Toggle */}
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <div className={`w-10 h-6 rounded-full p-1 transition-colors ${showSymbols ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showSymbols ? 'translate-x-4' : ''}`}></div>
+                                    </div>
+                                    <input type="checkbox" checked={showSymbols} onChange={(e) => setShowSymbols(e.target.checked)} className="hidden" />
+                                    <span className="text-xs font-bold text-slate-500">显示色号</span>
+                                </label>
+
+                                {/* Edit Mode Toggle */}
+                                {pattern && (
+                                    <button
+                                        onClick={() => setIsEditMode(!isEditMode)}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${isEditMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                    >
+                                        <span>{isEditMode ? '🎨 正在编辑' : '✏️ 修改豆豆'}</span>
+                                    </button>
+                                )}
+                             </div>
                          </div>
                          
                          {/* Export Controls */}
@@ -944,9 +1007,38 @@ export const BrickMe: React.FC = () => {
                     </div>
 
                     <div ref={viewportRef} className="flex-1 relative overflow-auto bg-slate-100 print:overflow-visible print:bg-white print:h-auto">
+                        
+                        {/* --- FLOATING EDIT TOOLBAR --- */}
+                        {isEditMode && pattern && (
+                            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-white rounded-full shadow-lg border border-slate-200 p-1.5 flex gap-2 animate-float sticky mt-4">
+                                <button
+                                    onClick={() => setActiveTool('paint')}
+                                    className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${activeTool === 'paint' ? 'border-indigo-500 scale-110' : 'border-transparent hover:bg-slate-100'}`}
+                                    title="画笔"
+                                >
+                                    <div className="w-4 h-4 rounded-full shadow-sm" style={{ backgroundColor: selectedBrushColor.hex }}></div>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTool('eraser')}
+                                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${activeTool === 'eraser' ? 'bg-red-100 text-red-600 shadow-inner' : 'hover:bg-slate-100 text-slate-400'}`}
+                                    title="橡皮擦"
+                                >
+                                    🧼
+                                </button>
+                                <div className="w-[1px] bg-slate-200 my-1"></div>
+                                <button
+                                    onClick={() => setShowColorPicker(true)}
+                                    className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 font-bold text-lg"
+                                    title="添加颜色"
+                                >
+                                    +
+                                </button>
+                            </div>
+                        )}
+
                         <div className="min-w-max min-h-max p-10 print:p-0 print:block">
                             {pattern ? (
-                                <div className="bg-white shadow-2xl inline-block p-4 rounded-sm">
+                                <div className={`bg-white shadow-2xl inline-block p-4 rounded-sm ${isEditMode ? 'cursor-pointer' : ''}`}>
                                     {/* Ruler Top - STICKY */}
                                     <div className="flex sticky top-0 z-20 bg-white shadow-sm" style={{ marginLeft: `${cellSize}px` }}>
                                         {Array.from({ length: pattern.width }).map((_, i) => {
@@ -984,12 +1076,13 @@ export const BrickMe: React.FC = () => {
 
                                         {/* Grid */}
                                         <div 
-                                            className="border-t border-l border-slate-300"
+                                            className="border-t border-l border-slate-300 select-none"
                                             style={{
                                                 display: 'grid',
                                                 gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
                                                 width: `${pattern.width * cellSize}px`,
                                             }}
+                                            onMouseLeave={() => { /* Potential drag end logic */ }}
                                         >
                                             {pattern.pixels.map((p, i) => {
                                                 // Contrast calculation for text
@@ -1009,6 +1102,7 @@ export const BrickMe: React.FC = () => {
                                                 return (
                                                     <div 
                                                         key={i}
+                                                        onClick={() => handlePixelClick(i)}
                                                         style={{ 
                                                             backgroundColor: p.color.hex,
                                                             aspectRatio: '1/1',
@@ -1016,9 +1110,11 @@ export const BrickMe: React.FC = () => {
                                                         className={`
                                                             flex items-center justify-center font-bold relative
                                                             border-r border-b 
+                                                            ${isEditMode ? (activeTool === 'eraser' ? 'hover:bg-red-50 hover:opacity-50' : 'hover:opacity-80') : ''}
                                                             ${isRightThick ? 'border-r-slate-400 border-r-2' : 'border-r-slate-200'}
                                                             ${isBottomThick ? 'border-b-slate-400 border-b-2' : 'border-b-slate-200'}
                                                         `}
+                                                        title={isEditMode ? `点击修改 (${p.x+1},${p.y+1})` : ''}
                                                     >
                                                         {p.color.symbol && showSymbols && (
                                                             <span style={{ fontSize: `${cellSize * 0.4}px`, color: textColor }}>
@@ -1043,11 +1139,13 @@ export const BrickMe: React.FC = () => {
                     </div>
                 </div>
 
-                {/* --- BOTTOM: MATERIALS --- */}
+                {/* --- BOTTOM: MATERIALS / PALETTE --- */}
                 {pattern && (
                     <div className="h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col shrink-0 no-print">
-                        <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-center">
-                             <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">材料清单</h3>
+                        <div className={`px-4 py-2 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-center ${isEditMode ? 'bg-indigo-50' : ''}`}>
+                             <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
+                                {isEditMode ? '🎨 调色板 (点击下方选择画笔)' : '材料清单'}
+                             </h3>
                              <span className="text-xs font-bold text-slate-400">{pattern.pixels.filter(p => p.color.hex !== 'transparent').length} 颗 • {Object.keys(pattern.counts).length} 色</span>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
@@ -1058,15 +1156,24 @@ export const BrickMe: React.FC = () => {
                                         const color = BEAD_COLORS.find(c => c.id === colorId);
                                         if (!color) return null;
                                         
-                                        // Contrast check for badge
                                         const r = parseInt(color.hex.slice(1,3), 16);
                                         const g = parseInt(color.hex.slice(3,5), 16);
                                         const b = parseInt(color.hex.slice(5,7), 16);
                                         const brightness = (r * 299 + g * 587 + b * 114) / 1000;
                                         const textCol = brightness > 140 ? '#000' : '#FFF';
+                                        
+                                        const isSelected = isEditMode && activeTool === 'paint' && selectedBrushColor.id === color.id;
 
                                         return (
-                                            <div key={colorId} className="flex items-center gap-3 bg-slate-50 pr-4 pl-1 py-1 rounded-full border border-slate-100 hover:border-slate-300 transition-colors">
+                                            <div 
+                                                key={colorId} 
+                                                onClick={() => isEditMode && selectColor(color)}
+                                                className={`
+                                                    flex items-center gap-3 pr-4 pl-1 py-1 rounded-full border transition-all 
+                                                    ${isEditMode ? 'cursor-pointer' : ''}
+                                                    ${isSelected ? 'bg-indigo-600 border-indigo-600 shadow-md ring-2 ring-indigo-200 text-white' : 'bg-slate-50 border-slate-100 hover:border-slate-300'}
+                                                `}
+                                            >
                                                 <div 
                                                     className="w-8 h-8 rounded-full border border-black/10 shadow-sm flex items-center justify-center text-[10px] font-bold shrink-0"
                                                     style={{ backgroundColor: color.hex, color: textCol }}
@@ -1074,8 +1181,8 @@ export const BrickMe: React.FC = () => {
                                                     {color.symbol}
                                                 </div>
                                                 <div className="flex flex-col">
-                                                    <span className="text-xs font-bold text-slate-700">{color.id}</span>
-                                                    <span className="text-[10px] text-slate-400 font-bold">x{count}</span>
+                                                    <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-700'}`}>{color.id}</span>
+                                                    <span className={`text-[10px] font-bold ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>x{count}</span>
                                                 </div>
                                             </div>
                                         );
@@ -1115,6 +1222,33 @@ export const BrickMe: React.FC = () => {
                             >
                                 {isRefining ? '处理中...' : '确认修改'}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* --- COLOR PICKER MODAL --- */}
+            {showColorPicker && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowColorPicker(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <h3 className="text-lg font-black text-slate-800">选择颜色</h3>
+                            <button onClick={() => setShowColorPicker(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+                        </div>
+                        <div className="p-6 overflow-y-auto grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-4">
+                            {BEAD_COLORS.map(c => (
+                                <button 
+                                    key={c.id} 
+                                    onClick={() => { selectColor(c); setShowColorPicker(false); }}
+                                    className="flex flex-col items-center gap-1 group"
+                                >
+                                    <div 
+                                        className="w-10 h-10 rounded-full border border-black/10 shadow-sm group-hover:scale-110 transition-transform"
+                                        style={{ backgroundColor: c.hex }}
+                                    ></div>
+                                    <span className="text-[10px] font-bold text-slate-500 group-hover:text-indigo-600">{c.id}</span>
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>
