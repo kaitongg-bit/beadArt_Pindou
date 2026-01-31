@@ -372,12 +372,17 @@ export const BrickMe: React.FC = () => {
         handlePixelClick(index);
     };
 
-    const handleMouseEnter = (index: number) => {
+    const handleMouseEnter = (index: number, e: React.MouseEvent) => {
+        // Only paint if we are in drawing state AND the primary button (1) is held down
         if (isDrawingMouse) {
-            handlePixelClick(index);
+            if (e.buttons === 1) {
+                handlePixelClick(index);
+            } else {
+                // Safety: If no button is pressed but state is true, reset it.
+                setIsDrawingMouse(false);
+            }
         }
     };
-
     const handleMouseUp = () => {
         setIsDrawingMouse(false);
     };
@@ -1556,7 +1561,7 @@ export const BrickMe: React.FC = () => {
                                                         key={i}
                                                         data-pixel-index={i}
                                                         onMouseDown={() => handleMouseDown(i)}
-                                                        onMouseEnter={() => handleMouseEnter(i)}
+                                                        onMouseEnter={(e) => handleMouseEnter(i, e)}
                                                         onMouseUp={handleMouseUp}
                                                         style={{
                                                             backgroundColor: p.color.hex,
