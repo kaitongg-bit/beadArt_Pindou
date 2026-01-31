@@ -133,7 +133,7 @@ export const BrickMe: React.FC = () => {
     const [isEditMode, setIsEditMode] = useState(false);
     const [selectedBrushColor, setSelectedBrushColor] = useState<BeadColor>(BEAD_COLORS[6]); // Default some color
     const [showColorPicker, setShowColorPicker] = useState(false);
-    const [activeTool, setActiveTool] = useState<'paint' | 'eraser' | 'eyedropper'>('paint');
+    const [activeTool, setActiveTool] = useState<'paint' | 'eraser' | 'eyedropper' | 'pan'>('paint');
     const [isSymmetric, setIsSymmetric] = useState(false);
     const [brushSize, setBrushSize] = useState<1 | 2>(1); // 1 = 1x1, 2 = 2x2 (or 4x4 for eraser)
     const [isDrawingMouse, setIsDrawingMouse] = useState(false);
@@ -274,6 +274,7 @@ export const BrickMe: React.FC = () => {
     // --- PIXEL EDITING LOGIC ---
     const handlePixelClick = (index: number) => {
         if (!pattern || !isEditMode) return;
+        if (activeTool === 'pan') return;
 
         // Eyedropper Logic
         if (activeTool === 'eyedropper') {
@@ -410,7 +411,7 @@ export const BrickMe: React.FC = () => {
                 const newZoom = Math.max(0.05, Math.min(2.5, startZoom * scale));
                 setZoomLevel(newZoom);
             }
-        } else if (e.touches.length === 1 && isEditMode && activeTab === 'preview') {
+        } else if (e.touches.length === 1 && isEditMode && activeTab === 'preview' && activeTool !== 'pan') {
             // Slide Painting Logic
             const touch = e.touches[0];
             const target = document.elementFromPoint(touch.clientX, touch.clientY);
@@ -1273,6 +1274,15 @@ export const BrickMe: React.FC = () => {
                                 {/* Tools */}
                                 <div className="flex items-center gap-2">
                                     <button
+                                        onClick={() => setActiveTool('pan')}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${activeTool === 'pan' ? 'bg-slate-100 border-slate-300 text-slate-800 shadow-inner' : 'bg-white border-transparent hover:bg-slate-50 text-slate-500'}`}
+                                        title="浏览模式 (防止误触)"
+                                    >
+                                        <span className="text-sm">✋</span>
+                                        <span className="text-sm font-bold">浏览</span>
+                                    </button>
+
+                                    <button
                                         onClick={() => {
                                             if (activeTool === 'paint') setShowColorPicker(true);
                                             else setActiveTool('paint');
@@ -1760,6 +1770,14 @@ export const BrickMe: React.FC = () => {
                                 </button>
 
                                 <div className="w-[1px] h-6 bg-slate-200"></div>
+
+                                {/* Pan / Scroll Tool */}
+                                <button
+                                    onClick={() => setActiveTool('pan')}
+                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all border active:scale-95 ${activeTool === 'pan' ? 'bg-slate-100 text-slate-600 border-slate-300 shadow-inner' : 'bg-white text-slate-400 border-slate-200'}`}
+                                >
+                                    ✋
+                                </button>
 
                                 {/* Color/Paint Tool */}
                                 <button
