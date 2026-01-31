@@ -1285,6 +1285,15 @@ export const BrickMe: React.FC = () => {
                                     </button>
 
                                     <button
+                                        onClick={() => setActiveTool('eyedropper')}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${activeTool === 'eyedropper' ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-white border-transparent hover:bg-slate-50 text-slate-500'}`}
+                                        title="吸管 (吸取颜色)"
+                                    >
+                                        <span className="text-sm">💉</span>
+                                        <span className="text-sm font-bold">吸管</span>
+                                    </button>
+
+                                    <button
                                         onClick={() => setActiveTool('eraser')}
                                         className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${activeTool === 'eraser' ? 'bg-slate-100 border-slate-300 text-slate-800' : 'bg-white border-transparent hover:bg-slate-50 text-slate-500'}`}
                                     >
@@ -1766,6 +1775,14 @@ export const BrickMe: React.FC = () => {
                                             🖊️
                                         </div>
                                     )}
+                                </button>
+
+                                {/* Eyedropper Tool */}
+                                <button
+                                    onClick={() => setActiveTool('eyedropper')}
+                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all border active:scale-95 ${activeTool === 'eyedropper' ? 'bg-amber-100 text-amber-600 border-amber-200 scale-105 shadow-md shadow-amber-100' : 'bg-white text-slate-400 border-slate-200'}`}
+                                >
+                                    💉
                                 </button>
 
                                 {/* Eraser Tool */}
