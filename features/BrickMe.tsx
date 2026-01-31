@@ -1757,14 +1757,14 @@ export const BrickMe: React.FC = () => {
                         )}
 
                         {/* MAIN TOOLBAR ROW */}
-                        <div className="flex items-center justify-between px-4 py-3 gap-3 bg-white">
+                        <div className="flex items-center justify-between px-3 py-2.5 gap-2 bg-white">
                             {/* Essential Tools Group */}
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2">
                                 {/* Undo */}
                                 <button
                                     onClick={handleUndo}
                                     disabled={historyIndex <= 0}
-                                    className="w-11 h-11 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-600 disabled:opacity-40 active:scale-95 transition-transform"
+                                    className="w-10 h-10 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-600 disabled:opacity-40 active:scale-95 transition-transform"
                                 >
                                     ↩
                                 </button>
@@ -1774,7 +1774,7 @@ export const BrickMe: React.FC = () => {
                                 {/* Pan / Scroll Tool */}
                                 <button
                                     onClick={() => setActiveTool('pan')}
-                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all border active:scale-95 ${activeTool === 'pan' ? 'bg-slate-100 text-slate-600 border-slate-300 shadow-inner' : 'bg-white text-slate-400 border-slate-200'}`}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all border active:scale-95 ${activeTool === 'pan' ? 'bg-slate-100 text-slate-600 border-slate-300 shadow-inner' : 'bg-white text-slate-400 border-slate-200'}`}
                                 >
                                     ✋
                                 </button>
@@ -1785,7 +1785,7 @@ export const BrickMe: React.FC = () => {
                                         if (activeTool === 'paint') setShowColorPicker(true);
                                         else setActiveTool('paint');
                                     }}
-                                    className={`w-12 h-12 rounded-full border-2 p-0.5 transition-all relative active:scale-95 ${activeTool === 'paint' ? 'border-indigo-600 scale-105 shadow-md shadow-indigo-100' : 'border-slate-200'}`}
+                                    className={`w-10 h-10 rounded-full border-2 p-0.5 transition-all relative active:scale-95 ${activeTool === 'paint' ? 'border-indigo-600 scale-105 shadow-md shadow-indigo-100' : 'border-slate-200'}`}
                                 >
                                     <div className="w-full h-full rounded-full shadow-sm ring-1 ring-black/5" style={{ backgroundColor: selectedBrushColor.hex }}></div>
                                     {activeTool === 'paint' && (
@@ -1798,7 +1798,7 @@ export const BrickMe: React.FC = () => {
                                 {/* Eyedropper Tool */}
                                 <button
                                     onClick={() => setActiveTool('eyedropper')}
-                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all border active:scale-95 ${activeTool === 'eyedropper' ? 'bg-amber-100 text-amber-600 border-amber-200 scale-105 shadow-md shadow-amber-100' : 'bg-white text-slate-400 border-slate-200'}`}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all border active:scale-95 ${activeTool === 'eyedropper' ? 'bg-amber-100 text-amber-600 border-amber-200 scale-105 shadow-md shadow-amber-100' : 'bg-white text-slate-400 border-slate-200'}`}
                                 >
                                     💉
                                 </button>
@@ -1806,7 +1806,7 @@ export const BrickMe: React.FC = () => {
                                 {/* Eraser Tool */}
                                 <button
                                     onClick={() => setActiveTool('eraser')}
-                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all border active:scale-95 ${activeTool === 'eraser' ? 'bg-indigo-100 text-indigo-600 border-indigo-200 scale-105 shadow-md shadow-indigo-100' : 'bg-white text-slate-400 border-slate-200'}`}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all border active:scale-95 ${activeTool === 'eraser' ? 'bg-indigo-100 text-indigo-600 border-indigo-200 scale-105 shadow-md shadow-indigo-100' : 'bg-white text-slate-400 border-slate-200'}`}
                                 >
                                     🧼
                                 </button>
@@ -1816,22 +1816,12 @@ export const BrickMe: React.FC = () => {
                             <div className="flex items-center gap-3">
                                 <button
                                     onClick={() => setShowMobileTools(!showMobileTools)}
-                                    className={`h-11 px-4 rounded-xl border-2 font-bold text-xs flex items-center gap-1 transition-all active:scale-95 ${showMobileTools ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-100 text-slate-500'}`}
+                                    className={`h-10 px-3 rounded-xl border-2 font-bold text-xs flex items-center gap-1 transition-all active:scale-95 ${showMobileTools ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-100 text-slate-500'}`}
                                 >
                                     更多 {showMobileTools ? '▼' : '▲'}
                                 </button>
 
-                                <button
-                                    onClick={() => {
-                                        setIsEditMode(false);
-                                        setActiveTool('paint');
-                                        setShowColorPicker(false);
-                                    }}
-                                    className="h-11 px-5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-green-200 active:scale-95 transition-all flex items-center gap-1"
-                                >
-                                    <span>✅</span>
-                                    <span className="hidden xs:inline">完成</span>
-                                </button>
+
                             </div>
                         </div>
                     </div>
