@@ -102,9 +102,10 @@ export const BrickMe: React.FC = () => {
     // View & Zoom
     const [zoomLevel, setZoomLevel] = useState<number>(1.0);
     const [isExporting, setIsExporting] = useState(false);
-    const [showSymbols, setShowSymbols] = useState(true);
-    const [showGrid, setShowGrid] = useState(true);
+    const [showSymbols, setShowSymbols] = useState(false);
+    const [showGrid, setShowGrid] = useState(false);
     const [keepWhite, setKeepWhite] = useState(false);
+    const [showMobileTools, setShowMobileTools] = useState(false); // New state for expanding mobile toolbar
 
     // Touch Gesture State
     const [touchStartDist, setTouchStartDist] = useState<number>(0);
@@ -1039,6 +1040,14 @@ export const BrickMe: React.FC = () => {
 
                         <div className="space-y-4">
 
+                            {/* Pro Tip: Mobile Pre-processing */}
+                            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex gap-3 text-xs text-blue-800 leading-relaxed mb-4">
+                                <span className="text-lg">💡</span>
+                                <div>
+                                    <span className="font-bold">小贴士：</span> 这里的调整功能比较基础。如果想要更好的色彩效果，建议您<b>先在手机相册里</b>把图片的对比度、饱和度调高一些，再上传到这里转换，效果会像魔法一样好哦！✨
+                                </div>
+                            </div>
+
                             {/* NEW: Image Adjustments */}
                             <div className="bg-slate-50 p-4 rounded-xl space-y-3">
                                 <div className="flex items-center justify-between">
@@ -1156,57 +1165,59 @@ export const BrickMe: React.FC = () => {
 
                     <div className="border-b border-slate-100 p-4 flex flex-wrap gap-4 justify-between items-center bg-slate-50 no-print z-10 relative shrink-0">
                         <div className="flex items-center gap-4 flex-wrap">
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-slate-400">缩放</span>
-                                <button onClick={handleAutoFit} className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded text-slate-600">适配</button>
-                                <input
-                                    type="range"
-                                    min="0.05"
-                                    max="2.5"
-                                    step="0.05"
-                                    value={zoomLevel}
-                                    onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
-                                    className="w-24 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                                />
-                            </div>
-
+                            {/* --- STANDARD VIEW CONTROLS (Always Visible) --- */}
                             <div className="flex items-center gap-4">
-                                {/* Grid Toggle */}
-                                <label className="flex items-center gap-2 cursor-pointer select-none">
-                                    <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${showGrid ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showGrid ? 'translate-x-3' : ''}`}></div>
-                                    </div>
-                                    <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} className="hidden" />
-                                    <span className="text-xs font-bold text-slate-500">网格</span>
-                                </label>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-400">缩放</span>
+                                    <button onClick={handleAutoFit} className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded text-slate-600">适配</button>
+                                    <input
+                                        type="range"
+                                        min="0.05"
+                                        max="2.5"
+                                        step="0.05"
+                                        value={zoomLevel}
+                                        onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+                                        className="w-24 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                    />
+                                </div>
 
-                                {/* Symbol Visibility Toggle */}
-                                <label className="flex items-center gap-2 cursor-pointer select-none">
-                                    <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${showSymbols ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showSymbols ? 'translate-x-3' : ''}`}></div>
-                                    </div>
-                                    <input type="checkbox" checked={showSymbols} onChange={(e) => setShowSymbols(e.target.checked)} className="hidden" />
-                                    <span className="text-xs font-bold text-slate-500">色号</span>
-                                </label>
+                                <div className="flex items-center gap-4">
+                                    {/* Grid Toggle */}
+                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                        <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${showGrid ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showGrid ? 'translate-x-3' : ''}`}></div>
+                                        </div>
+                                        <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} className="hidden" />
+                                        <span className="text-xs font-bold text-slate-500">网格</span>
+                                    </label>
 
-                                {/* Edit Mode Toggle */}
-                                {pattern && (
-                                    <button
-                                        onClick={() => {
-                                            const newMode = !isEditMode;
-                                            setIsEditMode(newMode);
-                                            if (newMode) setActiveTab('preview'); // Force preview tab when editing
-                                            if (!newMode) {
-                                                // When exiting, reset tool states
-                                                setActiveTool('paint');
-                                                setShowColorPicker(false);
-                                            }
-                                        }}
-                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${isEditMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                                    >
-                                        <span>{isEditMode ? '🎨 正在编辑' : '✏️ 修改豆豆'}</span>
-                                    </button>
-                                )}
+                                    {/* Symbol Visibility Toggle */}
+                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                        <div className={`w-8 h-5 rounded-full p-0.5 transition-colors ${showSymbols ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                            <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${showSymbols ? 'translate-x-3' : ''}`}></div>
+                                        </div>
+                                        <input type="checkbox" checked={showSymbols} onChange={(e) => setShowSymbols(e.target.checked)} className="hidden" />
+                                        <span className="text-xs font-bold text-slate-500">色号</span>
+                                    </label>
+
+                                    {/* Edit Mode Toggle (Desktop only mainly, but keep accessible) */}
+                                    {pattern && (
+                                        <button
+                                            onClick={() => {
+                                                const newMode = !isEditMode;
+                                                setIsEditMode(newMode);
+                                                if (newMode) setActiveTab('preview');
+                                                if (!newMode) {
+                                                    setActiveTool('paint');
+                                                    setShowColorPicker(false);
+                                                }
+                                            }}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${isEditMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                        >
+                                            <span>{isEditMode ? '🎨 正在编辑' : '✏️ 修改豆豆'}</span>
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -1239,6 +1250,127 @@ export const BrickMe: React.FC = () => {
                         </div>
                     </div>
 
+
+                    {/* --- SECONDARY EDIT TOOLBAR (DESKTOP ONLY) --- */}
+                    {isEditMode && pattern && (
+                        <div className="hidden lg:flex items-center justify-between px-4 py-2 border-b border-slate-200 bg-white z-20 shadow-sm gap-4 overflow-x-auto no-scrollbar">
+                            {/* Left Group: History & Tools */}
+                            <div className="flex items-center gap-4 shrink-0">
+                                {/* Undo/Redo */}
+                                <div className="flex bg-slate-100 rounded-lg p-0.5">
+                                    <button onClick={handleUndo} disabled={historyIndex <= 0} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 transition-all text-slate-600">↩</button>
+                                    <div className="w-[1px] bg-slate-300 my-1"></div>
+                                    <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 transition-all text-slate-600">↪</button>
+                                </div>
+
+                                <div className="w-[1px] h-6 bg-slate-200"></div>
+
+                                {/* Tools */}
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => {
+                                            if (activeTool === 'paint') setShowColorPicker(true);
+                                            else setActiveTool('paint');
+                                        }}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border-2 transition-all ${activeTool === 'paint' ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'bg-white border-transparent hover:bg-slate-50 text-slate-600'}`}
+                                        title="画笔 (点击切换颜色)"
+                                    >
+                                        <div className="w-4 h-4 rounded-full shadow-sm ring-1 ring-black/10" style={{ backgroundColor: selectedBrushColor.hex }}></div>
+                                        <span className="text-sm font-bold">画笔</span>
+                                    </button>
+
+                                    <button
+                                        onClick={() => setActiveTool('eraser')}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${activeTool === 'eraser' ? 'bg-slate-100 border-slate-300 text-slate-800' : 'bg-white border-transparent hover:bg-slate-50 text-slate-500'}`}
+                                    >
+                                        <span className="text-sm">🧼</span>
+                                        <span className="text-sm font-bold">橡皮</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Middle Group: Settings & Reference */}
+                            <div className="flex items-center gap-4 shrink-0">
+                                <div className="w-[1px] h-6 bg-slate-200"></div>
+
+                                {/* Brush Size */}
+                                <button
+                                    onClick={() => setBrushSize(prev => prev === 1 ? 2 : 1)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${brushSize === 2 ? 'bg-indigo-100 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                                >
+                                    {brushSize === 1 ? '• 细笔刷' : '● 粗笔刷'}
+                                </button>
+
+                                {/* Symmetry */}
+                                <button
+                                    onClick={() => setIsSymmetric(!isSymmetric)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${isSymmetric ? 'bg-indigo-100 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                                >
+                                    {isSymmetric ? '⇋ 对称: 开' : '⇋ 对称: 关'}
+                                </button>
+
+                                {/* Reference Image Toggle */}
+                                <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1 border border-slate-100">
+                                    <button
+                                        onClick={() => refImage && setShowRefImage(!showRefImage)}
+                                        disabled={!refImage}
+                                        className={`px-2 py-1 rounded text-xs font-bold transition-all ${!refImage ? 'opacity-50 cursor-not-allowed' : (showRefImage ? 'bg-green-100 text-green-700' : 'hover:bg-slate-200 text-slate-600')}`}
+                                    >
+                                        {refImage ? (showRefImage ? '👁️ 原图' : 'To 隐藏') : '无原图'}
+                                    </button>
+                                    <label className="cursor-pointer px-2 py-1 hover:bg-slate-200 rounded text-xs font-bold text-indigo-600 transition-colors" title="更改参考图">
+                                        📂
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    const reader = new FileReader();
+                                                    reader.onload = (ev) => {
+                                                        setRefImage(ev.target?.result as string);
+                                                        setShowRefImage(true);
+                                                    };
+                                                    reader.readAsDataURL(file);
+                                                }
+                                            }}
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Right Group: Actions */}
+                            <div className="flex items-center gap-4 shrink-0">
+                                <div className="w-[1px] h-6 bg-slate-200"></div>
+
+                                <button
+                                    onClick={() => setConfirmModal({
+                                        isOpen: true,
+                                        title: "清空画布确认",
+                                        message: "确定要清空画布吗？",
+                                        isDanger: true,
+                                        confirmText: "清空",
+                                        onConfirm: () => {
+                                            if (pattern) {
+                                                const newPixels = pattern.pixels.map(p => ({ ...p, color: { id: '', name: '', hex: 'transparent', symbol: '' } }));
+                                                const newCounts = {};
+                                                const emptyP = { ...pattern, pixels: newPixels, counts: newCounts };
+                                                setPattern(emptyP);
+                                                setHistory([...history.slice(0, historyIndex + 1), emptyP]);
+                                                setHistoryIndex(historyIndex + 1);
+                                            }
+                                        }
+                                    })}
+                                    className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all font-bold text-xs flex items-center gap-1"
+                                >
+                                    <span>🗑️</span>
+                                    <span>清空</span>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     <div
                         ref={viewportRef}
                         className="flex-1 relative overflow-auto bg-slate-100 print:overflow-visible print:bg-white print:h-auto"
@@ -1246,136 +1378,16 @@ export const BrickMe: React.FC = () => {
                         onTouchMove={onTouchMove}
                     >
 
-                        {/* --- FLOATING EDIT TOOLBAR (FIXED BOTTOM CENTER) --- */}
-                        {isEditMode && pattern && (
-                            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl border border-slate-200 px-4 py-2 flex items-center gap-4 transition-all hover:scale-105">
-                                {/* Undo / Redo */}
-                                <div className="flex gap-2 border-r border-slate-200 pr-4">
-                                    <button
-                                        onClick={handleUndo}
-                                        disabled={historyIndex <= 0}
-                                        className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 disabled:opacity-30 transition-colors text-lg"
-                                        title="撤销"
-                                    >
-                                        ↩
-                                    </button>
-                                    <button
-                                        onClick={handleRedo}
-                                        disabled={historyIndex >= history.length - 1}
-                                        className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 disabled:opacity-30 transition-colors text-lg"
-                                        title="重做"
-                                    >
-                                        ↪
-                                    </button>
-                                </div>
 
-                                <button
-                                    onClick={() => {
-                                        if (activeTool === 'paint') {
-                                            setShowColorPicker(true);
-                                        } else {
-                                            setActiveTool('paint');
-                                        }
-                                    }}
-                                    className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all ${activeTool === 'paint' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'}`}
-                                    title={activeTool === 'paint' ? "点击修改颜色" : "切换到画笔"}
-                                >
-                                    <div className="w-6 h-6 rounded-full shadow-sm ring-1 ring-black/5" style={{ backgroundColor: selectedBrushColor.hex }}></div>
-                                </button>
 
-                                <button
-                                    onClick={() => setActiveTool('eraser')}
-                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all ${activeTool === 'eraser' ? 'bg-indigo-100 text-indigo-600 shadow-inner ring-2 ring-indigo-200' : 'text-slate-400 hover:bg-slate-100'}`}
-                                    title="橡皮擦"
-                                >
-                                    🧼
-                                </button>
 
-                                {/* Clear Canvas Button (Triggers Modal) */}
-                                <button
-                                    onClick={() => {
-                                        setConfirmModal({
-                                            isOpen: true,
-                                            title: "清空画布确认",
-                                            message: "您确定要清空画布吗？当前的所有内容将被删除且不可找回。",
-                                            isDanger: true,
-                                            confirmText: "确定清空",
-                                            onConfirm: () => {
-                                                if (pattern) {
-                                                    const newPixels = pattern.pixels.map(p => ({ ...p, color: { id: '', name: '', hex: 'transparent', symbol: '' } }));
-                                                    const newPattern = { ...pattern, pixels: newPixels, counts: {} };
-                                                    setPattern(newPattern);
-                                                    addToHistory(newPattern);
-                                                }
-                                            }
-                                        });
-                                    }}
-                                    className="w-10 h-10 rounded-full flex items-center justify-center text-lg hover:bg-red-50 text-red-500 transition-all"
-                                    title="清空画布"
-                                >
-                                    🗑️
-                                </button>
 
-                                <div className="w-[1px] h-8 bg-slate-200"></div>
 
-                                {/* Reference Image Control - Simplified */}
-                                <div className="flex flex-col items-center gap-1">
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={() => refImage && setShowRefImage(!showRefImage)}
-                                            disabled={!refImage}
-                                            className={`w-8 h-4 rounded-full transition-colors relative ${showRefImage && refImage ? 'bg-green-500' : 'bg-slate-300'}`}
-                                            title={refImage ? (showRefImage ? "隐藏参考图" : "显示参考图") : "请先上传"}
-                                        >
-                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all shadow-sm ${showRefImage && refImage ? 'left-[18px]' : 'left-0.5'}`}></div>
-                                        </button>
-                                        <label className="cursor-pointer hover:opacity-70 transition-opacity" title="上传参考图">
-                                            📷
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                className="hidden"
-                                                onChange={(e) => {
-                                                    const file = e.target.files?.[0];
-                                                    if (file) {
-                                                        const reader = new FileReader();
-                                                        reader.onload = (ev) => {
-                                                            setRefImage(ev.target?.result as string);
-                                                            setShowRefImage(true);
-                                                        };
-                                                        reader.readAsDataURL(file);
-                                                    }
-                                                }}
-                                            />
-                                        </label>
-                                    </div>
-                                    <span className="text-[10px] text-slate-400 font-bold">参考图</span>
-                                </div>
 
-                                <div className="w-[1px] h-8 bg-slate-200"></div>
 
-                                {/* Tools: Size & Sym */}
-                                <div className="flex flex-col gap-1">
-                                    <button
-                                        onClick={() => setBrushSize(prev => prev === 1 ? 2 : 1)}
-                                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all border ${brushSize === 2 ? 'bg-indigo-600 text-white border-indigo-600' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
-                                        title="笔刷大小"
-                                    >
-                                        {brushSize === 1 ? '1x' : '4x'}
-                                    </button>
-                                </div>
 
-                                <div className="flex flex-col gap-1">
-                                    <button
-                                        onClick={() => setIsSymmetric(!isSymmetric)}
-                                        className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold transition-all border ${isSymmetric ? 'bg-indigo-600 text-white border-indigo-600' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
-                                        title="水平对称"
-                                    >
-                                        对称
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+
+
 
                         <div className="min-w-max min-h-max p-10 print:p-0 print:block">
                             {pattern ? (
@@ -1590,100 +1602,201 @@ export const BrickMe: React.FC = () => {
                 </div>
 
                 {/* Reference Image Overlay */}
-                {showRefImage && refImage && (
-                    <div className="absolute top-20 right-4 w-48 h-auto z-50 bg-white p-2 rounded-lg shadow-xl border border-slate-200 opacity-90 hover:opacity-100 transition-opacity">
-                        <div className="relative">
-                            <img src={refImage} alt="Ref" className="w-full h-auto rounded" />
-                            <button
-                                className="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow-md border-2 border-white hover:bg-slate-700"
-                                onClick={() => setShowRefImage(false)}
-                                title="Hide Reference"
-                            >✕</button>
-                        </div>
-                        <div className="text-[10px] text-center text-slate-400 mt-1 font-bold">参考图 (可拖动?)</div>
-                    </div>
-                )}
-
-                {/* Generic Confirmation Modal */}
-                {confirmModal.isOpen && (
-                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20 backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-2xl p-6 w-80 animate-in fade-in zoom-in duration-200">
-                            <h3 className="text-lg font-bold text-slate-800 mb-2">{confirmModal.title}</h3>
-                            <p className="text-slate-600 text-sm mb-6 whitespace-pre-wrap">{confirmModal.message}</p>
-                            <div className="flex justify-end gap-3">
+                {
+                    showRefImage && refImage && (
+                        <div className="absolute top-20 right-4 w-48 h-auto z-50 bg-white p-2 rounded-lg shadow-xl border border-slate-200 opacity-90 hover:opacity-100 transition-opacity">
+                            <div className="relative">
+                                <img src={refImage} alt="Ref" className="w-full h-auto rounded" />
                                 <button
-                                    onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                                    className="px-4 py-2 text-slate-500 font-bold text-sm hover:bg-slate-100 rounded-lg transition-colors"
-                                >
-                                    {confirmModal.cancelText || "取消"}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        confirmModal.onConfirm();
-                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                    }}
-                                    className={`px-4 py-2 text-white font-bold text-sm rounded-lg shadow-md transition-colors ${confirmModal.isDanger ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                                >
-                                    {confirmModal.confirmText || "确定"}
-                                </button>
+                                    className="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow-md border-2 border-white hover:bg-slate-700"
+                                    onClick={() => setShowRefImage(false)}
+                                    title="Hide Reference"
+                                >✕</button>
                             </div>
+                            <div className="text-[10px] text-center text-slate-400 mt-1 font-bold">参考图</div>
                         </div>
-                    </div>
-                )}
+                    )
+                }
+
+
                 {/* Mobile: Show only if activeTab is 'palette'. Desktop: Always show (if pattern exists). */}
-                {pattern && (
-                    <div className={`h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex-col shrink-0 no-print lg:flex ${showPalette ? 'flex h-auto flex-1' : 'hidden'}`}>
-                        <div className={`px-4 py-2 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-center ${isEditMode ? 'bg-indigo-50' : ''}`}>
-                            <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
-                                {isEditMode ? '🎨 调色板 (点击下方选择画笔)' : '材料清单'}
-                            </h3>
-                            <span className="text-xs font-bold text-slate-400">{pattern.pixels.filter(p => p.color.hex !== 'transparent').length} 颗 • {Object.keys(pattern.counts).length} 色</span>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
-                            <div className="flex flex-wrap gap-3">
-                                {Object.entries(pattern.counts)
-                                    .sort(([, a], [, b]) => (b as number) - (a as number))
-                                    .map(([colorId, count]) => {
-                                        const color = BEAD_COLORS.find(c => c.id === colorId);
-                                        if (!color) return null;
+                {
+                    pattern && (
+                        <div className={`h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex-col shrink-0 no-print lg:flex ${showPalette ? 'flex h-auto flex-1' : 'hidden'}`}>
+                            <div className={`px-4 py-2 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-center ${isEditMode ? 'bg-indigo-50' : ''}`}>
+                                <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
+                                    {isEditMode ? '🎨 调色板 (点击下方选择画笔)' : '材料清单'}
+                                </h3>
+                                <span className="text-xs font-bold text-slate-400">{pattern.pixels.filter(p => p.color.hex !== 'transparent').length} 颗 • {Object.keys(pattern.counts).length} 色</span>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
+                                <div className="flex flex-wrap gap-3">
+                                    {Object.entries(pattern.counts)
+                                        .sort(([, a], [, b]) => (b as number) - (a as number))
+                                        .map(([colorId, count]) => {
+                                            const color = BEAD_COLORS.find(c => c.id === colorId);
+                                            if (!color) return null;
 
-                                        const r = parseInt(color.hex.slice(1, 3), 16);
-                                        const g = parseInt(color.hex.slice(3, 5), 16);
-                                        const b = parseInt(color.hex.slice(5, 7), 16);
-                                        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-                                        const textCol = brightness > 140 ? '#000' : '#FFF';
+                                            const r = parseInt(color.hex.slice(1, 3), 16);
+                                            const g = parseInt(color.hex.slice(3, 5), 16);
+                                            const b = parseInt(color.hex.slice(5, 7), 16);
+                                            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                                            const textCol = brightness > 140 ? '#000' : '#FFF';
 
-                                        const isSelected = isEditMode && activeTool === 'paint' && selectedBrushColor.id === color.id;
+                                            const isSelected = isEditMode && activeTool === 'paint' && selectedBrushColor.id === color.id;
 
-                                        return (
-                                            <div
-                                                key={colorId}
-                                                onClick={() => isEditMode && selectColor(color)}
-                                                className={`
+                                            return (
+                                                <div
+                                                    key={colorId}
+                                                    onClick={() => isEditMode && selectColor(color)}
+                                                    className={`
                                                     flex items-center gap-3 pr-4 pl-1 py-1 rounded-full border transition-all 
                                                     ${isEditMode ? 'cursor-pointer' : ''}
                                                     ${isSelected ? 'bg-indigo-600 border-indigo-600 shadow-md ring-2 ring-indigo-200 text-white' : 'bg-slate-50 border-slate-100 hover:border-slate-300'}
                                                 `}
-                                            >
-                                                <div
-                                                    className="w-8 h-8 rounded-full border border-black/10 shadow-sm flex items-center justify-center text-[10px] font-bold shrink-0"
-                                                    style={{ backgroundColor: color.hex, color: textCol }}
                                                 >
-                                                    {color.symbol}
+                                                    <div
+                                                        className="w-8 h-8 rounded-full border border-black/10 shadow-sm flex items-center justify-center text-[10px] font-bold shrink-0"
+                                                        style={{ backgroundColor: color.hex, color: textCol }}
+                                                    >
+                                                        {color.symbol}
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-700'}`}>{color.id}</span>
+                                                        <span className={`text-[10px] font-bold ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>x{count}</span>
+                                                    </div>
                                                 </div>
-                                                <div className="flex flex-col">
-                                                    <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-700'}`}>{color.id}</span>
-                                                    <span className={`text-[10px] font-bold ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>x{count}</span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })
-                                }
+                                            );
+                                        })
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }
+            </div >
+
+            {/* --- MOBILE EDIT DOCK (Fixed Bottom) --- */}
+            {
+                isEditMode && pattern && (
+                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 lg:hidden safe-area-bottom flex flex-col shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+                        {/* EXPANDABLE TOOLS PANEL */}
+                        {showMobileTools && (
+                            <div className="p-3 border-b border-slate-100 bg-slate-50/80 backdrop-blur-sm animate-in slide-in-from-bottom duration-200">
+                                <div className="flex gap-3 justify-center">
+                                    <button
+                                        onClick={() => setBrushSize(prev => prev === 1 ? 2 : 1)}
+                                        className={`flex-1 py-3 rounded-xl text-xs font-bold border shadow-sm transition-all active:scale-95 ${brushSize === 2 ? 'bg-indigo-600 border-indigo-600 text-white shadow-indigo-200' : 'bg-white border-slate-200 text-slate-600'}`}
+                                    >
+                                        笔刷大小: {brushSize === 1 ? '1x' : '4x'}
+                                    </button>
+
+                                    <button
+                                        onClick={() => setIsSymmetric(!isSymmetric)}
+                                        className={`flex-1 py-3 rounded-xl text-xs font-bold border shadow-sm transition-all active:scale-95 ${isSymmetric ? 'bg-indigo-600 border-indigo-600 text-white shadow-indigo-200' : 'bg-white border-slate-200 text-slate-600'}`}
+                                    >
+                                        对称模式: {isSymmetric ? '开' : '关'}
+                                    </button>
+
+                                    <button
+                                        onClick={handleRedo}
+                                        disabled={historyIndex >= history.length - 1}
+                                        className="w-12 py-2 rounded-xl bg-white border border-slate-200 disabled:opacity-50 text-slate-600 flex items-center justify-center shadow-sm active:scale-95 transition-transform"
+                                    >
+                                        ↪
+                                    </button>
+
+                                    <button
+                                        onClick={() => setConfirmModal({
+                                            isOpen: true,
+                                            title: "清空画布确认",
+                                            message: "确定要清空画布吗？",
+                                            isDanger: true,
+                                            confirmText: "清空",
+                                            onConfirm: () => {
+                                                if (pattern) {
+                                                    const newPixels = pattern.pixels.map(p => ({ ...p, color: { id: '', name: '', hex: 'transparent', symbol: '' } }));
+                                                    const newCounts = {};
+                                                    const emptyP = { ...pattern, pixels: newPixels, counts: newCounts };
+                                                    setPattern(emptyP);
+                                                    setHistory([...history.slice(0, historyIndex + 1), emptyP]);
+                                                    setHistoryIndex(historyIndex + 1);
+                                                }
+                                            }
+                                        })}
+                                        className="w-12 py-2 rounded-xl bg-red-50 border border-red-100 text-red-500 hover:bg-red-100 flex items-center justify-center shadow-sm active:scale-95 transition-transform"
+                                    >
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* MAIN TOOLBAR ROW */}
+                        <div className="flex items-center justify-between px-4 py-3 gap-3 bg-white">
+                            {/* Essential Tools Group */}
+                            <div className="flex items-center gap-4">
+                                {/* Undo */}
+                                <button
+                                    onClick={handleUndo}
+                                    disabled={historyIndex <= 0}
+                                    className="w-11 h-11 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-600 disabled:opacity-40 active:scale-95 transition-transform"
+                                >
+                                    ↩
+                                </button>
+
+                                <div className="w-[1px] h-6 bg-slate-200"></div>
+
+                                {/* Color/Paint Tool */}
+                                <button
+                                    onClick={() => {
+                                        if (activeTool === 'paint') setShowColorPicker(true);
+                                        else setActiveTool('paint');
+                                    }}
+                                    className={`w-12 h-12 rounded-full border-2 p-0.5 transition-all relative active:scale-95 ${activeTool === 'paint' ? 'border-indigo-600 scale-105 shadow-md shadow-indigo-100' : 'border-slate-200'}`}
+                                >
+                                    <div className="w-full h-full rounded-full shadow-sm ring-1 ring-black/5" style={{ backgroundColor: selectedBrushColor.hex }}></div>
+                                    {activeTool === 'paint' && (
+                                        <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full border border-white">
+                                            🖊️
+                                        </div>
+                                    )}
+                                </button>
+
+                                {/* Eraser Tool */}
+                                <button
+                                    onClick={() => setActiveTool('eraser')}
+                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all border active:scale-95 ${activeTool === 'eraser' ? 'bg-indigo-100 text-indigo-600 border-indigo-200 scale-105 shadow-md shadow-indigo-100' : 'bg-white text-slate-400 border-slate-200'}`}
+                                >
+                                    🧼
+                                </button>
+                            </div>
+
+                            {/* Action Group */}
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setShowMobileTools(!showMobileTools)}
+                                    className={`h-11 px-4 rounded-xl border-2 font-bold text-xs flex items-center gap-1 transition-all active:scale-95 ${showMobileTools ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-100 text-slate-500'}`}
+                                >
+                                    更多 {showMobileTools ? '▼' : '▲'}
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        setIsEditMode(false);
+                                        setActiveTool('paint');
+                                        setShowColorPicker(false);
+                                    }}
+                                    className="h-11 px-5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-green-200 active:scale-95 transition-all flex items-center gap-1"
+                                >
+                                    <span>✅</span>
+                                    <span className="hidden xs:inline">完成</span>
+                                </button>
                             </div>
                         </div>
                     </div>
-                )}
-            </div>
+                )
+            }
 
             {/* --- MOBILE TAB BAR (STANDARD) --- */}
             {/* HIDE when in Edit Mode */}
@@ -1951,6 +2064,35 @@ export const BrickMe: React.FC = () => {
                                     className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-all text-lg"
                                 >
                                     创建画布
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* Generic Confirmation Modal - MOVED TO END & FORCED Z-INDEX */}
+            {
+                confirmModal.isOpen && (
+                    <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 h-full w-full" style={{ zIndex: 99999 }}>
+                        <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-in fade-in zoom-in duration-200 mx-auto border border-slate-100 relative" onClick={e => e.stopPropagation()}>
+                            <h3 className="text-xl font-black text-slate-800 mb-3">{confirmModal.title}</h3>
+                            <p className="text-slate-600 text-sm mb-8 leading-relaxed whitespace-pre-wrap">{confirmModal.message}</p>
+                            <div className="flex justify-end gap-3 touch-none">
+                                <button
+                                    onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                                    className="flex-1 px-4 py-3 text-slate-500 font-bold text-sm bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors active:scale-95"
+                                >
+                                    {confirmModal.cancelText || "取消"}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        confirmModal.onConfirm();
+                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                    }}
+                                    className={`flex-1 px-4 py-3 text-white font-bold text-sm rounded-xl shadow-lg transition-transform active:scale-95 ${confirmModal.isDanger ? 'bg-red-500 active:bg-red-600 shadow-red-200' : 'bg-indigo-600 active:bg-indigo-700 shadow-indigo-200'}`}
+                                >
+                                    {confirmModal.confirmText || "确定"}
                                 </button>
                             </div>
                         </div>
