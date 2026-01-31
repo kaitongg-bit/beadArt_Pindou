@@ -110,9 +110,23 @@ export const BrickMe: React.FC = () => {
     const [touchStartDist, setTouchStartDist] = useState<number>(0);
     const [startZoom, setStartZoom] = useState<number>(1);
 
-    // --- NEW CANVAS STATE ---
     const [showNewCanvasModal, setShowNewCanvasModal] = useState(false);
     const [newCanvasBoards, setNewCanvasBoards] = useState({ w: 1, h: 1 });
+    // Generic Confirm Modal State
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        onConfirm: () => void;
+        confirmText?: string;
+        cancelText?: string;
+        isDanger?: boolean;
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+    });
 
     // --- EDIT MODE STATES ---
     const [isEditMode, setIsEditMode] = useState(false);
@@ -155,47 +169,56 @@ export const BrickMe: React.FC = () => {
     const BASE_CELL_SIZE = 25;
 
     // Reset flow when new image uploaded
+    // Reset flow when new image uploaded
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
+        const processFile = () => {
+            setStatusMsg('正在读取...');
+            setPattern(null);
+            setIsEditMode(false);
+            setActiveTab('settings');
+
+            // Reset adjustments & History
+            setImgBrightness(100);
+            setImgSaturation(100);
+            setImgContrast(100);
+            setHistory([]);
+            setHistoryIndex(-1);
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const rawBase64 = event.target?.result as string;
+                const img = new Image();
+                img.src = rawBase64;
+                await new Promise((resolve) => {
+                    img.onload = () => {
+                        setImageDimensions({ width: img.width, height: img.height });
+                        resolve(true);
+                    };
+                });
+                setOriginalImage(rawBase64);
+                setStatusMsg('');
+            };
+            reader.readAsDataURL(file);
+        };
+
         // Warn if replacing existing work
         if (pattern && isEditMode) {
-            if (!window.confirm("上传新图片将覆盖当前画布，确定要继续吗？\n(如果只是想看参考图，不需要在这里上传哦)")) {
-                e.target.value = ''; // Reset input
-                return;
-            }
+            setConfirmModal({
+                isOpen: true,
+                title: "覆盖画布警告",
+                message: "上传新图片将覆盖当前画布，确定要继续吗？\n(如果只是想看参考图，请使用右下角的‘参考图’功能)",
+                isDanger: true,
+                confirmText: "确定覆盖",
+                onConfirm: () => processFile()
+            });
+            e.target.value = ''; // Reset input
+            return;
         }
 
-        setStatusMsg('正在读取...');
-        setPattern(null);
-        setIsEditMode(false);
-        setActiveTab('settings'); // Stay on settings to adjust
-
-        // Reset adjustments & History
-        setImgBrightness(100);
-        setImgSaturation(100);
-        setImgContrast(100);
-        setHistory([]);
-        setHistoryIndex(-1);
-
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            const rawBase64 = event.target?.result as string;
-
-            const img = new Image();
-            img.src = rawBase64;
-            await new Promise((resolve) => {
-                img.onload = () => {
-                    setImageDimensions({ width: img.width, height: img.height });
-                    resolve(true);
-                };
-            });
-
-            setOriginalImage(rawBase64);
-            setStatusMsg('');
-        };
-        reader.readAsDataURL(file);
+        processFile();
     };
 
     const handleGeneratePattern = () => {
@@ -399,52 +422,68 @@ export const BrickMe: React.FC = () => {
 
     // --- NEW CANVAS LOGIC ---
     const handleCreateBlankCanvas = () => {
-        const pixelW = newCanvasBoards.w * 52; // Standard 52x52
+        const pixelW = newCanvasBoards.w * 52; // Assuming 52 is board size
         const pixelH = newCanvasBoards.h * 52;
 
+        // Generate empty pixels
+        // ... grid logic ... need to recreate or assume it's simple enough
         const totalPixels = pixelW * pixelH;
+        // Optimization: Create array directly
         const pixels: BeadPixel[] = [];
-        const emptyCounts: Record<string, number> = {};
-
-        // Initialize empty grid
-        for (let i = 0; i < totalPixels; i++) {
-            const x = i % pixelW;
-            const y = Math.floor(i / pixelW);
-            pixels.push({
-                x, y,
-                color: { id: '', name: '', hex: 'transparent', symbol: '' }
-            });
+        for (let y = 0; y < pixelH; y++) {
+            for (let x = 0; x < pixelW; x++) {
+                pixels.push({
+                    x, y,
+                    color: { id: '', name: '', hex: 'transparent', symbol: '' }
+                });
+            }
         }
 
+        const emptyCounts = {};
+
+        const doCreate = () => {
+            setPattern({
+                width: pixelW,
+                height: pixelH,
+                pixels: pixels, // use the prefetched ones
+                counts: emptyCounts
+            });
+
+            // Init History
+            setHistory([{
+                width: pixelW,
+                height: pixelH,
+                pixels: JSON.parse(JSON.stringify(pixels)),
+                counts: emptyCounts
+            }]);
+            setHistoryIndex(0);
+
+            // Setup Editor
+            setProjectName('MyDesign');
+            setOriginalImage(null); // Clear image if any
+            setIsEditMode(true);
+            setActiveTab('preview');
+            setStatusMsg('');
+            setShowNewCanvasModal(false); // Close size modal
+
+            // Auto fit
+            setTimeout(handleAutoFit, 100);
+        };
+
         // Confirm override if pattern exists
-        if (pattern && !window.confirm("这将覆盖当前的画布，确定要继续吗？")) return;
+        if (pattern) {
+            setConfirmModal({
+                isOpen: true,
+                title: "覆盖画布警告",
+                message: "这将创建一个新的空白画布，当前未保存的内容将丢失。",
+                isDanger: true,
+                confirmText: "确定新建",
+                onConfirm: () => doCreate()
+            });
+            return;
+        }
 
-        setPattern({
-            width: pixelW,
-            height: pixelH,
-            pixels: JSON.parse(JSON.stringify(pixels)),
-            counts: emptyCounts
-        });
-
-        // Init History
-        setHistory([{
-            width: pixelW,
-            height: pixelH,
-            pixels: JSON.parse(JSON.stringify(pixels)),
-            counts: emptyCounts
-        }]);
-        setHistoryIndex(0);
-
-        // Setup Editor
-        setProjectName('MyDesign');
-        setOriginalImage(null); // Clear image if any
-        setIsEditMode(true);
-        setActiveTab('preview');
-        setStatusMsg('');
-        setShowNewCanvasModal(false);
-
-        // Auto fit
-        setTimeout(handleAutoFit, 100);
+        doCreate();
     };
 
     // --- PIXELATION ALGORITHM ---
@@ -1157,6 +1196,11 @@ export const BrickMe: React.FC = () => {
                                             const newMode = !isEditMode;
                                             setIsEditMode(newMode);
                                             if (newMode) setActiveTab('preview'); // Force preview tab when editing
+                                            if (!newMode) {
+                                                // When exiting, reset tool states
+                                                setActiveTool('paint');
+                                                setShowColorPicker(false);
+                                            }
                                         }}
                                         className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${isEditMode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
                                     >
@@ -1202,15 +1246,15 @@ export const BrickMe: React.FC = () => {
                         onTouchMove={onTouchMove}
                     >
 
-                        {/* --- FLOATING EDIT TOOLBAR (DESKTOP ONLY) --- */}
+                        {/* --- FLOATING EDIT TOOLBAR (FIXED BOTTOM CENTER) --- */}
                         {isEditMode && pattern && (
-                            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-white rounded-full shadow-lg border border-slate-200 p-1.5 gap-2 animate-float sticky mt-4 hidden lg:flex items-center">
+                            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl border border-slate-200 px-4 py-2 flex items-center gap-4 transition-all hover:scale-105">
                                 {/* Undo / Redo */}
-                                <div className="flex gap-1 mr-2 border-r border-slate-200 pr-2">
+                                <div className="flex gap-2 border-r border-slate-200 pr-4">
                                     <button
                                         onClick={handleUndo}
                                         disabled={historyIndex <= 0}
-                                        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                                        className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 disabled:opacity-30 transition-colors text-lg"
                                         title="撤销"
                                     >
                                         ↩
@@ -1218,7 +1262,7 @@ export const BrickMe: React.FC = () => {
                                     <button
                                         onClick={handleRedo}
                                         disabled={historyIndex >= history.length - 1}
-                                        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
+                                        className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 disabled:opacity-30 transition-colors text-lg"
                                         title="重做"
                                     >
                                         ↪
@@ -1233,94 +1277,103 @@ export const BrickMe: React.FC = () => {
                                             setActiveTool('paint');
                                         }
                                     }}
-                                    className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${activeTool === 'paint' ? 'border-indigo-500 scale-110' : 'border-transparent hover:bg-slate-100'}`}
+                                    className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all ${activeTool === 'paint' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'}`}
                                     title={activeTool === 'paint' ? "点击修改颜色" : "切换到画笔"}
                                 >
-                                    <div className="w-4 h-4 rounded-full shadow-sm" style={{ backgroundColor: selectedBrushColor.hex }}></div>
+                                    <div className="w-6 h-6 rounded-full shadow-sm ring-1 ring-black/5" style={{ backgroundColor: selectedBrushColor.hex }}></div>
                                 </button>
 
                                 <button
                                     onClick={() => setActiveTool('eraser')}
-                                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${activeTool === 'eraser' ? 'bg-indigo-100 text-indigo-600 shadow-inner' : 'hover:bg-slate-100 text-slate-400'}`}
+                                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl transition-all ${activeTool === 'eraser' ? 'bg-indigo-100 text-indigo-600 shadow-inner ring-2 ring-indigo-200' : 'text-slate-400 hover:bg-slate-100'}`}
                                     title="橡皮擦"
                                 >
                                     🧼
                                 </button>
 
-                                {/* Clear Canvas Button */}
+                                {/* Clear Canvas Button (Triggers Modal) */}
                                 <button
                                     onClick={() => {
-                                        if (window.confirm("确定要清空画布吗？\n所有内容将删除且不可找回！")) {
-                                            const width = pattern.width;
-                                            const newPixels = pattern.pixels.map(p => ({ ...p, color: { id: '', name: '', hex: 'transparent', symbol: '' } }));
-                                            const newPattern = { ...pattern, pixels: newPixels, counts: {} };
-                                            setPattern(newPattern);
-                                            addToHistory(newPattern);
-                                        }
+                                        setConfirmModal({
+                                            isOpen: true,
+                                            title: "清空画布确认",
+                                            message: "您确定要清空画布吗？当前的所有内容将被删除且不可找回。",
+                                            isDanger: true,
+                                            confirmText: "确定清空",
+                                            onConfirm: () => {
+                                                if (pattern) {
+                                                    const newPixels = pattern.pixels.map(p => ({ ...p, color: { id: '', name: '', hex: 'transparent', symbol: '' } }));
+                                                    const newPattern = { ...pattern, pixels: newPixels, counts: {} };
+                                                    setPattern(newPattern);
+                                                    addToHistory(newPattern);
+                                                }
+                                            }
+                                        });
                                     }}
-                                    className="w-8 h-8 rounded-full flex items-center justify-center text-sm hover:bg-red-100 text-red-500 transition-all"
-                                    title="清空画布 (慎用!)"
+                                    className="w-10 h-10 rounded-full flex items-center justify-center text-lg hover:bg-red-50 text-red-500 transition-all"
+                                    title="清空画布"
                                 >
-                                    ```
                                     🗑️
                                 </button>
 
-                                <div className="w-[1px] h-4 bg-slate-200 mx-1"></div>
+                                <div className="w-[1px] h-8 bg-slate-200"></div>
 
-                                {/* Reference Image Control */}
-                                <div className="flex items-center gap-2 bg-slate-50 rounded-full pr-1 pl-3 py-1 border border-slate-200">
-                                    <span className="text-xs font-bold text-slate-500">参考图</span>
-
-                                    {/* Toggle Switch */}
-                                    <button
-                                        onClick={() => refImage && setShowRefImage(!showRefImage)}
-                                        disabled={!refImage}
-                                        className={`w-8 h-4 rounded-full transition-colors relative ${showRefImage && refImage ? 'bg-green-500' : 'bg-slate-300'}`}
-                                        title={refImage ? (showRefImage ? "隐藏" : "显示") : "请先上传参考图"}
-                                    >
-                                        <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all shadow-sm ${showRefImage && refImage ? 'left-[18px]' : 'left-0.5'}`}></div>
-                                    </button>
-
-                                    {/* Upload Button */}
-                                    <label className="w-6 h-6 flex items-center justify-center bg-white rounded-full shadow-sm border border-slate-200 cursor-pointer hover:bg-slate-50 text-xs" title="上传/更换参考图">
-                                        📷
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            className="hidden"
-                                            onChange={(e) => {
-                                                const file = e.target.files?.[0];
-                                                if (file) {
-                                                    const reader = new FileReader();
-                                                    reader.onload = (ev) => {
-                                                        setRefImage(ev.target?.result as string);
-                                                        setShowRefImage(true);
-                                                    };
-                                                    reader.readAsDataURL(file);
-                                                }
-                                            }}
-                                        />
-                                    </label>
+                                {/* Reference Image Control - Simplified */}
+                                <div className="flex flex-col items-center gap-1">
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => refImage && setShowRefImage(!showRefImage)}
+                                            disabled={!refImage}
+                                            className={`w-8 h-4 rounded-full transition-colors relative ${showRefImage && refImage ? 'bg-green-500' : 'bg-slate-300'}`}
+                                            title={refImage ? (showRefImage ? "隐藏参考图" : "显示参考图") : "请先上传"}
+                                        >
+                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all shadow-sm ${showRefImage && refImage ? 'left-[18px]' : 'left-0.5'}`}></div>
+                                        </button>
+                                        <label className="cursor-pointer hover:opacity-70 transition-opacity" title="上传参考图">
+                                            📷
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
+                                                onChange={(e) => {
+                                                    const file = e.target.files?.[0];
+                                                    if (file) {
+                                                        const reader = new FileReader();
+                                                        reader.onload = (ev) => {
+                                                            setRefImage(ev.target?.result as string);
+                                                            setShowRefImage(true);
+                                                        };
+                                                        reader.readAsDataURL(file);
+                                                    }
+                                                }}
+                                            />
+                                        </label>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400 font-bold">参考图</span>
                                 </div>
 
-                                <div className="w-[1px] h-4 bg-slate-200 mx-1"></div>
+                                <div className="w-[1px] h-8 bg-slate-200"></div>
 
                                 {/* Tools: Size & Sym */}
-                                <button
-                                    onClick={() => setBrushSize(prev => prev === 1 ? 2 : 1)}
-                                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${brushSize === 2 ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-                                    title="笔刷大小"
-                                >
-                                    {brushSize === 1 ? '1x' : '4x'}
-                                </button>
+                                <div className="flex flex-col gap-1">
+                                    <button
+                                        onClick={() => setBrushSize(prev => prev === 1 ? 2 : 1)}
+                                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all border ${brushSize === 2 ? 'bg-indigo-600 text-white border-indigo-600' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+                                        title="笔刷大小"
+                                    >
+                                        {brushSize === 1 ? '1x' : '4x'}
+                                    </button>
+                                </div>
 
-                                <button
-                                    onClick={() => setIsSymmetric(!isSymmetric)}
-                                    className={`px-2 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${isSymmetric ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100'}`}
-                                    title="水平对称"
-                                >
-                                    对称
-                                </button>
+                                <div className="flex flex-col gap-1">
+                                    <button
+                                        onClick={() => setIsSymmetric(!isSymmetric)}
+                                        className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold transition-all border ${isSymmetric ? 'bg-indigo-600 text-white border-indigo-600' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+                                        title="水平对称"
+                                    >
+                                        对称
+                                    </button>
+                                </div>
                             </div>
                         )}
 
@@ -1551,7 +1604,32 @@ export const BrickMe: React.FC = () => {
                     </div>
                 )}
 
-                {/* --- BOTTOM: MATERIALS / PALETTE (PALETTE TAB) --- */}
+                {/* Generic Confirmation Modal */}
+                {confirmModal.isOpen && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20 backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-2xl p-6 w-80 animate-in fade-in zoom-in duration-200">
+                            <h3 className="text-lg font-bold text-slate-800 mb-2">{confirmModal.title}</h3>
+                            <p className="text-slate-600 text-sm mb-6 whitespace-pre-wrap">{confirmModal.message}</p>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                                    className="px-4 py-2 text-slate-500 font-bold text-sm hover:bg-slate-100 rounded-lg transition-colors"
+                                >
+                                    {confirmModal.cancelText || "取消"}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        confirmModal.onConfirm();
+                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                    }}
+                                    className={`px-4 py-2 text-white font-bold text-sm rounded-lg shadow-md transition-colors ${confirmModal.isDanger ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                >
+                                    {confirmModal.confirmText || "确定"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 {/* Mobile: Show only if activeTab is 'palette'. Desktop: Always show (if pattern exists). */}
                 {pattern && (
                     <div className={`h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex-col shrink-0 no-print lg:flex ${showPalette ? 'flex h-auto flex-1' : 'hidden'}`}>
@@ -1634,243 +1712,251 @@ export const BrickMe: React.FC = () => {
             </div>
 
             {/* --- MOBILE EDIT TOOLBAR & BOTTOM SHEET --- */}
-            {isEditMode && pattern && (
-                <>
-                    {/* Fixed Edit Toolbar */}
-                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-between items-center h-16 px-4 lg:hidden z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] safe-area-bottom">
-                        <div className="flex gap-4 items-center">
-                            {/* Eraser */}
-                            <button
-                                onClick={() => setActiveTool('eraser')}
-                                className={`flex flex-col items-center justify-center px-2 ${activeTool === 'eraser' ? 'text-red-500' : 'text-slate-400'}`}
-                            >
-                                <span className="text-xl">🧼</span>
-                                <span className="text-[10px] font-bold">橡皮</span>
-                            </button>
+            {
+                isEditMode && pattern && (
+                    <>
+                        {/* Fixed Edit Toolbar */}
+                        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-between items-center h-16 px-4 lg:hidden z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] safe-area-bottom">
+                            <div className="flex gap-4 items-center">
+                                {/* Eraser */}
+                                <button
+                                    onClick={() => setActiveTool('eraser')}
+                                    className={`flex flex-col items-center justify-center px-2 ${activeTool === 'eraser' ? 'text-red-500' : 'text-slate-400'}`}
+                                >
+                                    <span className="text-xl">🧼</span>
+                                    <span className="text-[10px] font-bold">橡皮</span>
+                                </button>
 
-                            <div className="w-[1px] h-8 bg-slate-200"></div>
+                                <div className="w-[1px] h-8 bg-slate-200"></div>
 
-                            {/* Current Color / Open Palette */}
-                            <button
-                                onClick={() => setShowMobilePalette(true)}
-                                className="flex items-center gap-3 bg-slate-100 rounded-full pl-1 pr-4 py-1 border border-slate-200"
-                            >
-                                <div
-                                    className="w-8 h-8 rounded-full border border-black/10 shadow-sm"
-                                    style={{ backgroundColor: selectedBrushColor.hex }}
-                                ></div>
-                                <div className="flex flex-col items-start">
-                                    <span className="text-[10px] font-bold text-slate-400">当前颜色</span>
-                                    <span className="text-xs font-black text-slate-700">{selectedBrushColor.id} ▾</span>
-                                </div>
-                            </button>
+                                {/* Current Color / Open Palette */}
+                                <button
+                                    onClick={() => setShowMobilePalette(true)}
+                                    className="flex items-center gap-3 bg-slate-100 rounded-full pl-1 pr-4 py-1 border border-slate-200"
+                                >
+                                    <div
+                                        className="w-8 h-8 rounded-full border border-black/10 shadow-sm"
+                                        style={{ backgroundColor: selectedBrushColor.hex }}
+                                    ></div>
+                                    <div className="flex flex-col items-start">
+                                        <span className="text-[10px] font-bold text-slate-400">当前颜色</span>
+                                        <span className="text-xs font-black text-slate-700">{selectedBrushColor.id} ▾</span>
+                                    </div>
+                                </button>
+
+                                <button
+                                    onClick={() => setShowColorPicker(true)}
+                                    className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 border border-slate-200 bg-white"
+                                >
+                                    +
+                                </button>
+                            </div>
 
                             <button
-                                onClick={() => setShowColorPicker(true)}
-                                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 border border-slate-200 bg-white"
+                                onClick={() => setIsEditMode(false)}
+                                className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold"
                             >
-                                +
+                                完成
                             </button>
                         </div>
 
-                        <button
-                            onClick={() => setIsEditMode(false)}
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold"
+                        {/* Bottom Sheet Palette */}
+                        <div
+                            className={`fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 transition-transform duration-300 ease-out shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.3)] flex flex-col max-h-[60vh] lg:hidden ${showMobilePalette ? 'translate-y-0' : 'translate-y-full'}`}
+                            onClick={(e) => e.stopPropagation()}
                         >
-                            完成
-                        </button>
-                    </div>
+                            <div className="p-4 border-b border-slate-100 flex justify-between items-center shrink-0">
+                                <h3 className="font-black text-slate-700">选择颜色</h3>
+                                <button onClick={() => setShowMobilePalette(false)} className="text-slate-400 p-2 text-xl">&times;</button>
+                            </div>
 
-                    {/* Bottom Sheet Palette */}
-                    <div
-                        className={`fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 transition-transform duration-300 ease-out shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.3)] flex flex-col max-h-[60vh] lg:hidden ${showMobilePalette ? 'translate-y-0' : 'translate-y-full'}`}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="p-4 border-b border-slate-100 flex justify-between items-center shrink-0">
-                            <h3 className="font-black text-slate-700">选择颜色</h3>
-                            <button onClick={() => setShowMobilePalette(false)} className="text-slate-400 p-2 text-xl">&times;</button>
-                        </div>
+                            <div className="overflow-y-auto p-4 pb-8">
+                                <div className="flex flex-wrap gap-3 justify-center">
+                                    {Object.entries(pattern.counts)
+                                        .sort(([, a], [, b]) => (b as number) - (a as number))
+                                        .map(([colorId, count]) => {
+                                            const color = BEAD_COLORS.find(c => c.id === colorId);
+                                            if (!color) return null;
 
-                        <div className="overflow-y-auto p-4 pb-8">
-                            <div className="flex flex-wrap gap-3 justify-center">
-                                {Object.entries(pattern.counts)
-                                    .sort(([, a], [, b]) => (b as number) - (a as number))
-                                    .map(([colorId, count]) => {
-                                        const color = BEAD_COLORS.find(c => c.id === colorId);
-                                        if (!color) return null;
+                                            const r = parseInt(color.hex.slice(1, 3), 16);
+                                            const g = parseInt(color.hex.slice(3, 5), 16);
+                                            const b = parseInt(color.hex.slice(5, 7), 16);
+                                            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                                            const textCol = brightness > 140 ? '#000' : '#FFF';
 
-                                        const r = parseInt(color.hex.slice(1, 3), 16);
-                                        const g = parseInt(color.hex.slice(3, 5), 16);
-                                        const b = parseInt(color.hex.slice(5, 7), 16);
-                                        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-                                        const textCol = brightness > 140 ? '#000' : '#FFF';
+                                            const isSelected = selectedBrushColor.id === color.id;
 
-                                        const isSelected = selectedBrushColor.id === color.id;
-
-                                        return (
-                                            <div
-                                                key={colorId}
-                                                onClick={() => selectColor(color)}
-                                                className={`
+                                            return (
+                                                <div
+                                                    key={colorId}
+                                                    onClick={() => selectColor(color)}
+                                                    className={`
                                                     flex items-center gap-2 pr-3 pl-1 py-1 rounded-full border transition-all cursor-pointer
                                                     ${isSelected ? 'bg-indigo-600 border-indigo-600 ring-2 ring-indigo-200 text-white' : 'bg-slate-50 border-slate-100'}
                                                 `}
-                                            >
-                                                <div
-                                                    className="w-8 h-8 rounded-full border border-black/10 shadow-sm flex items-center justify-center text-[10px] font-bold shrink-0"
-                                                    style={{ backgroundColor: color.hex, color: textCol }}
                                                 >
-                                                    {color.symbol}
+                                                    <div
+                                                        className="w-8 h-8 rounded-full border border-black/10 shadow-sm flex items-center justify-center text-[10px] font-bold shrink-0"
+                                                        style={{ backgroundColor: color.hex, color: textCol }}
+                                                    >
+                                                        {color.symbol}
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-700'}`}>{color.id}</span>
+                                                        <span className={`text-[10px] font-bold ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>x{count}</span>
+                                                    </div>
                                                 </div>
-                                                <div className="flex flex-col">
-                                                    <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-700'}`}>{color.id}</span>
-                                                    <span className={`text-[10px] font-bold ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>x{count}</span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })
-                                }
-                                {/* Add New Color Button in Sheet */}
-                                <button
-                                    onClick={() => { setShowMobilePalette(false); setShowColorPicker(true); }}
-                                    className="flex items-center gap-2 px-4 py-1 rounded-full border border-dashed border-slate-300 text-slate-400 font-bold text-xs hover:bg-slate-50"
-                                >
-                                    + 添加新色
-                                </button>
+                                            );
+                                        })
+                                    }
+                                    {/* Add New Color Button in Sheet */}
+                                    <button
+                                        onClick={() => { setShowMobilePalette(false); setShowColorPicker(true); }}
+                                        className="flex items-center gap-2 px-4 py-1 rounded-full border border-dashed border-slate-300 text-slate-400 font-bold text-xs hover:bg-slate-50"
+                                    >
+                                        + 添加新色
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    {/* Backdrop for sheet */}
-                    {showMobilePalette && (
-                        <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setShowMobilePalette(false)}></div>
-                    )}
-                </>
-            )}
+                        {/* Backdrop for sheet */}
+                        {showMobilePalette && (
+                            <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setShowMobilePalette(false)}></div>
+                        )}
+                    </>
+                )
+            }
 
             {/* --- REFINE MODAL --- */}
-            {showRefineModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-float">
-                        <h3 className="text-lg font-black text-slate-800 mb-2">修改细节</h3>
-                        <p className="text-slate-500 text-sm mb-4">
-                            请描述您希望修改的地方 (例如: "把头发改浅一点", "左眼修整一下")
-                        </p>
-                        <textarea
-                            value={refinePrompt}
-                            onChange={(e) => setRefinePrompt(e.target.value)}
-                            className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm focus:border-indigo-500 outline-none min-h-[100px]"
-                            placeholder="输入修改指令..."
-                        />
-                        <div className="flex gap-3 mt-6">
-                            <button
-                                onClick={() => setShowRefineModal(false)}
-                                className="flex-1 py-2 font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
-                            >
-                                取消
-                            </button>
-                            <button
-                                onClick={handleRefine}
-                                disabled={!refinePrompt.trim() || isRefining}
-                                className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors disabled:opacity-50"
-                            >
-                                {isRefining ? '处理中...' : '确认修改'}
-                            </button>
+            {
+                showRefineModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-float">
+                            <h3 className="text-lg font-black text-slate-800 mb-2">修改细节</h3>
+                            <p className="text-slate-500 text-sm mb-4">
+                                请描述您希望修改的地方 (例如: "把头发改浅一点", "左眼修整一下")
+                            </p>
+                            <textarea
+                                value={refinePrompt}
+                                onChange={(e) => setRefinePrompt(e.target.value)}
+                                className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm focus:border-indigo-500 outline-none min-h-[100px]"
+                                placeholder="输入修改指令..."
+                            />
+                            <div className="flex gap-3 mt-6">
+                                <button
+                                    onClick={() => setShowRefineModal(false)}
+                                    className="flex-1 py-2 font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={handleRefine}
+                                    disabled={!refinePrompt.trim() || isRefining}
+                                    className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors disabled:opacity-50"
+                                >
+                                    {isRefining ? '处理中...' : '确认修改'}
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* --- COLOR PICKER MODAL --- */}
-            {showColorPicker && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowColorPicker(false)}>
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h3 className="text-lg font-black text-slate-800">选择颜色</h3>
-                            <button onClick={() => setShowColorPicker(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
-                        </div>
-                        <div className="p-6 overflow-y-auto grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-4">
-                            {BEAD_COLORS.map(c => (
-                                <button
-                                    key={c.id}
-                                    onClick={() => { selectColor(c); setShowColorPicker(false); }}
-                                    className="flex flex-col items-center gap-1 group"
-                                >
-                                    <div
-                                        className="w-10 h-10 rounded-full border border-black/10 shadow-sm group-hover:scale-110 transition-transform"
-                                        style={{ backgroundColor: c.hex }}
-                                    ></div>
-                                    <span className="text-[10px] font-bold text-slate-500 group-hover:text-indigo-600">{c.id}</span>
-                                </button>
-                            ))}
+            {
+                showColorPicker && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowColorPicker(false)}>
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                <h3 className="text-lg font-black text-slate-800">选择颜色</h3>
+                                <button onClick={() => setShowColorPicker(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+                            </div>
+                            <div className="p-6 overflow-y-auto grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-4">
+                                {BEAD_COLORS.map(c => (
+                                    <button
+                                        key={c.id}
+                                        onClick={() => { selectColor(c); setShowColorPicker(false); }}
+                                        className="flex flex-col items-center gap-1 group"
+                                    >
+                                        <div
+                                            className="w-10 h-10 rounded-full border border-black/10 shadow-sm group-hover:scale-110 transition-transform"
+                                            style={{ backgroundColor: c.hex }}
+                                        ></div>
+                                        <span className="text-[10px] font-bold text-slate-500 group-hover:text-indigo-600">{c.id}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
             {/* --- NEW CANVAS MODAL --- */}
-            {showNewCanvasModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowNewCanvasModal(false)}>
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-float" onClick={e => e.stopPropagation()}>
-                        <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">
-                            <span>🎨</span> 新建画布
-                        </h3>
+            {
+                showNewCanvasModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowNewCanvasModal(false)}>
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-float" onClick={e => e.stopPropagation()}>
+                            <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">
+                                <span>🎨</span> 新建画布
+                            </h3>
 
-                        <div className="space-y-6">
-                            {/* Width */}
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                                    横向板数 (Cols)
-                                </label>
-                                <div className="flex items-center justify-between bg-slate-50 rounded-xl p-2 border border-slate-200">
-                                    <button
-                                        className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-slate-600 active:scale-95 transition-transform"
-                                        onClick={() => setNewCanvasBoards(prev => ({ ...prev, w: Math.max(1, prev.w - 1) }))}
-                                    >-</button>
-                                    <span className="font-black text-2xl text-slate-800 w-16 text-center">{newCanvasBoards.w}</span>
-                                    <button
-                                        className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-indigo-600 active:scale-95 transition-transform"
-                                        onClick={() => setNewCanvasBoards(prev => ({ ...prev, w: Math.min(6, prev.w + 1) }))}
-                                    >+</button>
+                            <div className="space-y-6">
+                                {/* Width */}
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
+                                        横向板数 (Cols)
+                                    </label>
+                                    <div className="flex items-center justify-between bg-slate-50 rounded-xl p-2 border border-slate-200">
+                                        <button
+                                            className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-slate-600 active:scale-95 transition-transform"
+                                            onClick={() => setNewCanvasBoards(prev => ({ ...prev, w: Math.max(1, prev.w - 1) }))}
+                                        >-</button>
+                                        <span className="font-black text-2xl text-slate-800 w-16 text-center">{newCanvasBoards.w}</span>
+                                        <button
+                                            className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-indigo-600 active:scale-95 transition-transform"
+                                            onClick={() => setNewCanvasBoards(prev => ({ ...prev, w: Math.min(6, prev.w + 1) }))}
+                                        >+</button>
+                                    </div>
                                 </div>
+
+                                {/* Height */}
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
+                                        纵向板数 (Rows)
+                                    </label>
+                                    <div className="flex items-center justify-between bg-slate-50 rounded-xl p-2 border border-slate-200">
+                                        <button
+                                            className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-slate-600 active:scale-95 transition-transform"
+                                            onClick={() => setNewCanvasBoards(prev => ({ ...prev, h: Math.max(1, prev.h - 1) }))}
+                                        >-</button>
+                                        <span className="font-black text-2xl text-slate-800 w-16 text-center">{newCanvasBoards.h}</span>
+                                        <button
+                                            className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-indigo-600 active:scale-95 transition-transform"
+                                            onClick={() => setNewCanvasBoards(prev => ({ ...prev, h: Math.min(6, prev.h + 1) }))}
+                                        >+</button>
+                                    </div>
+                                </div>
+
+                                <div className="bg-indigo-50 p-4 rounded-xl text-center">
+                                    <div className="text-xs font-bold text-indigo-400 mb-1">画布尺寸</div>
+                                    <div className="text-xl font-black text-indigo-700">
+                                        {newCanvasBoards.w * 52} x {newCanvasBoards.h * 52} px
+                                    </div>
+                                    <div className="text-[10px] bg-white inline-block px-2 py-1 rounded text-indigo-400 mt-2 font-bold">
+                                        {newCanvasBoards.w * newCanvasBoards.h} 块大板 (52mm)
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handleCreateBlankCanvas}
+                                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-all text-lg"
+                                >
+                                    创建画布
+                                </button>
                             </div>
-
-                            {/* Height */}
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                                    纵向板数 (Rows)
-                                </label>
-                                <div className="flex items-center justify-between bg-slate-50 rounded-xl p-2 border border-slate-200">
-                                    <button
-                                        className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-slate-600 active:scale-95 transition-transform"
-                                        onClick={() => setNewCanvasBoards(prev => ({ ...prev, h: Math.max(1, prev.h - 1) }))}
-                                    >-</button>
-                                    <span className="font-black text-2xl text-slate-800 w-16 text-center">{newCanvasBoards.h}</span>
-                                    <button
-                                        className="w-10 h-10 bg-white rounded-lg shadow-sm border border-slate-200 font-bold text-xl text-indigo-600 active:scale-95 transition-transform"
-                                        onClick={() => setNewCanvasBoards(prev => ({ ...prev, h: Math.min(6, prev.h + 1) }))}
-                                    >+</button>
-                                </div>
-                            </div>
-
-                            <div className="bg-indigo-50 p-4 rounded-xl text-center">
-                                <div className="text-xs font-bold text-indigo-400 mb-1">画布尺寸</div>
-                                <div className="text-xl font-black text-indigo-700">
-                                    {newCanvasBoards.w * 52} x {newCanvasBoards.h * 52} px
-                                </div>
-                                <div className="text-[10px] bg-white inline-block px-2 py-1 rounded text-indigo-400 mt-2 font-bold">
-                                    {newCanvasBoards.w * newCanvasBoards.h} 块大板 (52mm)
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleCreateBlankCanvas}
-                                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-all text-lg"
-                            >
-                                创建画布
-                            </button>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 };
