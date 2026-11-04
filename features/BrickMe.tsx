@@ -1107,8 +1107,9 @@ export const BrickMe: React.FC = () => {
         };
     };
 
-    const handleAutoFit = (targetPattern?: BeadPattern) => {
-        const p = targetPattern || pattern;
+    const handleAutoFit = (targetPattern?: BeadPattern | any) => {
+        // 防御 React 点击事件对象误入实参导致 NaN
+        const p = (targetPattern && typeof targetPattern.width === 'number') ? targetPattern : pattern;
         if (!p || !viewportRef.current) return;
         const { clientWidth, clientHeight } = viewportRef.current;
         if (clientWidth === 0 || clientHeight === 0) return;
@@ -1119,11 +1120,19 @@ export const BrickMe: React.FC = () => {
         const contentW = (p.width + 1) * BASE_CELL_SIZE;
         const contentH = (p.height + 1) * BASE_CELL_SIZE;
 
+        if (contentW <= 0 || contentH <= 0) return;
+
         const scaleW = availableW / contentW;
         const scaleH = availableH / contentH;
 
         const newZoom = Math.min(scaleW, scaleH, 1.2);
-        setZoomLevel(Math.max(0.05, newZoom));
+        if (!isNaN(newZoom) && newZoom > 0) {
+            setZoomLevel(Math.max(0.05, newZoom));
+            if (viewportRef.current) {
+                viewportRef.current.scrollLeft = 0;
+                viewportRef.current.scrollTop = 0;
+            }
+        }
     };
 
     // 仅在首次生成新图纸或首次进入预览时自动适配缩放，之后用户自由编辑、缩放不再自动重置
@@ -1696,7 +1705,7 @@ export const BrickMe: React.FC = () => {
                             <div className="flex items-center gap-4">
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs font-bold text-slate-400">缩放</span>
-                                    <button onClick={handleAutoFit} className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded text-slate-600">适配</button>
+                                    <button onClick={() => handleAutoFit()} className="px-2 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 rounded text-slate-600 active:scale-95 transition-transform" title="重置适配视口">适配</button>
                                     <input
                                         type="range"
                                         min="0.05"
@@ -2299,8 +2308,17 @@ export const BrickMe: React.FC = () => {
                                         onClick={handleRedo}
                                         disabled={historyIndex >= history.length - 1}
                                         className="w-12 py-2 rounded-xl bg-white border border-slate-200 disabled:opacity-50 text-slate-600 flex items-center justify-center shadow-sm active:scale-95 transition-transform"
+                                        title="重做"
                                     >
                                         ↪
+                                    </button>
+
+                                    <button
+                                        onClick={() => handleAutoFit()}
+                                        className="px-2.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center shadow-sm active:scale-95 transition-transform font-bold text-xs"
+                                        title="重置全图居中适配"
+                                    >
+                                        适配
                                     </button>
 
                                     <button
