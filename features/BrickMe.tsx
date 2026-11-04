@@ -231,6 +231,8 @@ export const BrickMe: React.FC = () => {
     const [isDrawingMouse, setIsDrawingMouse] = useState(false);
     const [lassoPoints, setLassoPoints] = useState<{ x: number; y: number }[]>([]);
     const [isLassoing, setIsLassoing] = useState(false);
+    const lassoPointsRef = useRef<{ x: number; y: number }[]>([]);
+    const gridRef = useRef<HTMLDivElement>(null);
 
     // Check for unload (refresh/close warning)
     useEffect(() => {
@@ -550,28 +552,30 @@ export const BrickMe: React.FC = () => {
         setShowMobilePalette(false); // Close sheet on selection
     };
 
-    const applyLassoFill = (points: { x: number; y: number }[]) => {
-        if (!pattern || points.length < 2) {
+    const applyLassoFill = (points?: { x: number; y: number }[]) => {
+        const pts = points && points.length >= 2 ? points : lassoPointsRef.current;
+        if (!pattern || pts.length < 2) {
             setLassoPoints([]);
+            lassoPointsRef.current = [];
             return;
         }
 
-        const minX = Math.min(...points.map(p => p.x));
-        const maxX = Math.max(...points.map(p => p.x));
-        const minY = Math.min(...points.map(p => p.y));
-        const maxY = Math.max(...points.map(p => p.y));
+        const minX = Math.min(...pts.map(p => p.x));
+        const maxX = Math.max(...pts.map(p => p.x));
+        const minY = Math.min(...pts.map(p => p.y));
+        const maxY = Math.max(...pts.map(p => p.y));
 
-        const pointSet = new Set(points.map(p => `${p.x},${p.y}`));
+        const pointSet = new Set(pts.map(p => `${p.x},${p.y}`));
 
         const isInside = (px: number, py: number) => {
             if (pointSet.has(`${px},${py}`)) return true;
-            if (points.length <= 4) {
+            if (pts.length <= 4) {
                 return px >= minX && px <= maxX && py >= minY && py <= maxY;
             }
             let inside = false;
-            for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
-                const xi = points[i].x, yi = points[i].y;
-                const xj = points[j].x, yj = points[j].y;
+            for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+                const xi = pts[i].x, yi = pts[i].y;
+                const xj = pts[j].x, yj = pts[j].y;
                 const intersect = ((yi > py) !== (yj > py)) &&
                     (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
                 if (intersect) inside = !inside;
@@ -604,6 +608,53 @@ export const BrickMe: React.FC = () => {
             });
         }
         setLassoPoints([]);
+        lassoPointsRef.current = [];
+    };
+
+    // 连续补点算法：手指在触屏上划得再快也不会漏点断笔
+    const addLassoPoint = (pt: { x: number; y: number }) => {
+        const prev = lassoPointsRef.current;
+        if (prev.length === 0) {
+            lassoPointsRef.current = [pt];
+            setLassoPoints([pt]);
+            return;
+        }
+        const last = prev[prev.length - 1];
+        if (last.x === pt.x && last.y === pt.y) return;
+
+        const dx = pt.x - last.x;
+        const dy = pt.y - last.y;
+        const dist = Math.max(Math.abs(dx), Math.abs(dy));
+        const ptsToAdd: { x: number; y: number }[] = [];
+
+        for (let step = 1; step <= dist; step++) {
+            const ix = Math.round(last.x + (dx * step) / dist);
+            const iy = Math.round(last.y + (dy * step) / dist);
+            ptsToAdd.push({ x: ix, y: iy });
+        }
+
+        const nextPoints = [...prev, ...ptsToAdd];
+        lassoPointsRef.current = nextPoints;
+        setLassoPoints(nextPoints);
+    };
+
+    // 精确将物理触控坐标映射为拼豆像素格子坐标 (抗缩放、抗DOM漂移)
+    const getGridCoordsFromPoint = (clientX: number, clientY: number): { x: number; y: number; index: number } | null => {
+        if (!gridRef.current || !pattern) return null;
+        const rect = gridRef.current.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+
+        const relX = clientX - rect.left;
+        const relY = clientY - rect.top;
+
+        const cellW = rect.width / pattern.width;
+        const cellH = rect.height / pattern.height;
+
+        const x = Math.floor(relX / cellW);
+        const y = Math.floor(relY / cellH);
+
+        if (x < 0 || x >= pattern.width || y < 0 || y >= pattern.height) return null;
+        return { x, y, index: y * pattern.width + x };
     };
 
     // --- MOUSE HANDLERS (DESKTOP SLIDE PAINT) ---
@@ -612,6 +663,7 @@ export const BrickMe: React.FC = () => {
             setIsLassoing(true);
             const w = pattern?.width || 1;
             const pt = { x: index % w, y: Math.floor(index / w) };
+            lassoPointsRef.current = [pt];
             setLassoPoints([pt]);
             return;
         }
@@ -623,33 +675,28 @@ export const BrickMe: React.FC = () => {
         if (activeTool === 'lasso' && isLassoing && pattern) {
             const w = pattern.width;
             const pt = { x: index % w, y: Math.floor(index / w) };
-            setLassoPoints(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.x === pt.x && last.y === pt.y) return prev;
-                return [...prev, pt];
-            });
+            addLassoPoint(pt);
             return;
         }
-        // Only paint if we are in drawing state AND the primary button (1) is held down
         if (isDrawingMouse) {
             if (e.buttons === 1) {
                 handlePixelClick(index);
             } else {
-                // Safety: If no button is pressed but state is true, reset it.
                 setIsDrawingMouse(false);
             }
         }
     };
+
     const handleMouseUp = () => {
         if (activeTool === 'lasso' && isLassoing) {
             setIsLassoing(false);
-            applyLassoFill(lassoPoints);
+            applyLassoFill(lassoPointsRef.current);
             return;
         }
         setIsDrawingMouse(false);
     };
 
-    // --- TOUCH GESTURE LOGIC (PINCH ZOOM) ---
+    // --- TOUCH GESTURE LOGIC (PINCH ZOOM & SMOOTH DRAWING) ---
     const onTouchStart = (e: React.TouchEvent) => {
         if (e.touches.length === 2) {
             const dist = Math.hypot(
@@ -658,6 +705,18 @@ export const BrickMe: React.FC = () => {
             );
             setTouchStartDist(dist);
             setStartZoom(zoomLevel);
+        } else if (e.touches.length === 1 && isEditMode && activeTab === 'preview' && activeTool !== 'pan') {
+            const touch = e.touches[0];
+            const coords = getGridCoordsFromPoint(touch.clientX, touch.clientY);
+            if (coords) {
+                if (activeTool === 'lasso') {
+                    setIsLassoing(true);
+                    lassoPointsRef.current = [{ x: coords.x, y: coords.y }];
+                    setLassoPoints([{ x: coords.x, y: coords.y }]);
+                } else {
+                    handlePixelClick(coords.index);
+                }
+            }
         }
     };
 
@@ -673,27 +732,14 @@ export const BrickMe: React.FC = () => {
                 setZoomLevel(newZoom);
             }
         } else if (e.touches.length === 1 && isEditMode && activeTab === 'preview' && activeTool !== 'pan') {
-            // Slide Painting & Lasso Logic
             const touch = e.touches[0];
-            const target = document.elementFromPoint(touch.clientX, touch.clientY);
-            if (target) {
-                const cell = target.closest('[data-pixel-index]') as HTMLElement;
-                if (cell) {
-                    const index = parseInt(cell.dataset.pixelIndex || '-1');
-                    if (index !== -1) {
-                        if (activeTool === 'lasso') {
-                            if (!isLassoing) setIsLassoing(true);
-                            const w = pattern?.width || 1;
-                            const pt = { x: index % w, y: Math.floor(index / w) };
-                            setLassoPoints(prev => {
-                                const last = prev[prev.length - 1];
-                                if (last && last.x === pt.x && last.y === pt.y) return prev;
-                                return [...prev, pt];
-                            });
-                        } else {
-                            handlePixelClick(index);
-                        }
-                    }
+            const coords = getGridCoordsFromPoint(touch.clientX, touch.clientY);
+            if (coords) {
+                if (activeTool === 'lasso') {
+                    if (!isLassoing) setIsLassoing(true);
+                    addLassoPoint({ x: coords.x, y: coords.y });
+                } else {
+                    handlePixelClick(coords.index);
                 }
             }
         }
@@ -702,9 +748,39 @@ export const BrickMe: React.FC = () => {
     const onTouchEnd = () => {
         if (activeTool === 'lasso' && isLassoing) {
             setIsLassoing(false);
-            applyLassoFill(lassoPoints);
+            applyLassoFill(lassoPointsRef.current);
         }
     };
+
+    // 原生拦截 touchmove 滚动默认行为：在非抓手(绘制/套索)模式下彻底禁止手机页面上下滑动
+    useEffect(() => {
+        const el = viewportRef.current;
+        if (!el) return;
+
+        const onNativeTouchStart = (e: TouchEvent) => {
+            if (e.touches.length === 1 && isEditMode && activeTab === 'preview' && activeTool !== 'pan') {
+                if (e.cancelable) {
+                    e.preventDefault();
+                }
+            }
+        };
+
+        const onNativeTouchMove = (e: TouchEvent) => {
+            if (e.touches.length === 1 && isEditMode && activeTab === 'preview' && activeTool !== 'pan') {
+                if (e.cancelable) {
+                    e.preventDefault();
+                }
+            }
+        };
+
+        el.addEventListener('touchstart', onNativeTouchStart, { passive: false });
+        el.addEventListener('touchmove', onNativeTouchMove, { passive: false });
+
+        return () => {
+            el.removeEventListener('touchstart', onNativeTouchStart);
+            el.removeEventListener('touchmove', onNativeTouchMove);
+        };
+    }, [isEditMode, activeTab, activeTool]);
 
     // --- NEW CANVAS LOGIC ---
     const handleCreateBlankCanvas = () => {
@@ -1837,6 +1913,9 @@ export const BrickMe: React.FC = () => {
                     <div
                         ref={viewportRef}
                         className="flex-1 relative overflow-auto bg-slate-100 print:overflow-visible print:bg-white print:h-auto"
+                        style={{
+                            touchAction: isEditMode && activeTab === 'preview' && activeTool !== 'pan' ? 'none' : 'auto'
+                        }}
                         onTouchStart={onTouchStart}
                         onTouchMove={onTouchMove}
                         onTouchEnd={onTouchEnd}
@@ -1957,16 +2036,18 @@ export const BrickMe: React.FC = () => {
 
                                         {/* Grid */}
                                         <div
+                                            ref={gridRef}
                                             className={`select-none relative ${showGrid ? 'border-t border-l border-slate-300' : ''}`}
                                             style={{
                                                 display: 'grid',
                                                 gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
                                                 width: `${pattern.width * cellSize}px`,
+                                                touchAction: isEditMode && activeTab === 'preview' && activeTool !== 'pan' ? 'none' : 'auto'
                                             }}
                                             onMouseLeave={() => {
                                                 if (isLassoing) {
                                                     setIsLassoing(false);
-                                                    applyLassoFill(lassoPoints);
+                                                    applyLassoFill(lassoPointsRef.current);
                                                 }
                                                 setIsDrawingMouse(false);
                                             }}
