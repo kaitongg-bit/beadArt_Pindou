@@ -262,6 +262,7 @@ export const BrickMe: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
+    const hasAutoFittedRef = useRef(false);
 
     const BASE_CELL_SIZE = 25;
 
@@ -278,6 +279,7 @@ export const BrickMe: React.FC = () => {
             setActiveTab('settings');
 
             // Reset adjustments & History
+            hasAutoFittedRef.current = false;
             setImgBrightness(100);
             setImgSaturation(100);
             setImgContrast(100);
@@ -829,6 +831,7 @@ export const BrickMe: React.FC = () => {
             setShowNewCanvasModal(false); // Close size modal
 
             // Auto fit
+            hasAutoFittedRef.current = true;
             setTimeout(handleAutoFit, 100);
         };
 
@@ -1099,6 +1102,7 @@ export const BrickMe: React.FC = () => {
                 const c = BEAD_COLORS.find(bc => bc.id === mostProminent[0]);
                 if (c) setSelectedBrushColor(c);
             }
+            hasAutoFittedRef.current = true;
             setTimeout(() => handleAutoFit(initialPattern), 150);
         };
     };
@@ -1122,13 +1126,14 @@ export const BrickMe: React.FC = () => {
         setZoomLevel(Math.max(0.05, newZoom));
     };
 
-    // Auto-fit whenever pattern changes or tab changes to preview
+    // 仅在首次生成新图纸或首次进入预览时自动适配缩放，之后用户自由编辑、缩放不再自动重置
     useEffect(() => {
-        if (pattern && activeTab === 'preview') {
+        if (pattern && activeTab === 'preview' && !hasAutoFittedRef.current) {
+            hasAutoFittedRef.current = true;
             const timer = setTimeout(() => handleAutoFit(pattern), 100);
             return () => clearTimeout(timer);
         }
-    }, [pattern, activeTab]);
+    }, [activeTab]);
 
     // --- EXPORT FUNCTION ---
     const handleExport = (format: 'png' | 'pdf') => {
@@ -1138,7 +1143,7 @@ export const BrickMe: React.FC = () => {
         setTimeout(() => {
             try {
                 const MAX_CANVAS_DIMENSION = 4000;
-                const BASE_PX = 50;
+                const BASE_PX = 45;
                 const maxSide = Math.max(pattern.width, pattern.height);
 
                 let PX_PER_CELL = BASE_PX;
@@ -1147,30 +1152,30 @@ export const BrickMe: React.FC = () => {
                 }
                 PX_PER_CELL = Math.max(PX_PER_CELL, 10);
 
-                const RULER_SIZE = PX_PER_CELL * 1.5;
-                const PADDING = 40;
-                const HEADER_H = 100;
-                const FOOTER_H = 70;
+                const RULER_SIZE = Math.max(16, Math.floor(PX_PER_CELL * 0.9));
+                const PADDING = 24;
+                const HEADER_H = 64;
+                const FOOTER_H = 36;
 
                 const gridW = pattern.width * PX_PER_CELL;
                 const gridH = pattern.height * PX_PER_CELL;
 
-                const SWATCH_SIZE = 90;
-                const TEXT_HEIGHT_BELOW = 50;
-                const GROUP_W = 100;
-                const GROUP_H = SWATCH_SIZE + TEXT_HEIGHT_BELOW;
-                const GAP_X = 30;
-                const GAP_Y = 40;
-                const LEGEND_PADDING_TOP = 100;
+                // --- 紧凑扁平色号表参数 (大幅压扁色块与间距，消除长条垂直拉长) ---
+                const ITEM_W = 104;
+                const ITEM_H = 34;
+                const GAP_X = 8;
+                const GAP_Y = 8;
+                const LEGEND_PADDING_TOP = 24;
 
-                const totalW = Math.max(RULER_SIZE + gridW + RULER_SIZE + (PADDING * 2), 900);
+                const totalW = Math.max(RULER_SIZE + gridW + RULER_SIZE + (PADDING * 2), 850);
                 const legendAreaW = totalW - (PADDING * 2);
-                const legendCols = Math.max(1, Math.floor(legendAreaW / (GROUP_W + GAP_X)));
-                const distinctColors = Object.entries(pattern.counts);
+                const legendCols = Math.max(1, Math.floor(legendAreaW / (ITEM_W + GAP_X)));
+                const distinctColors = Object.entries(pattern.counts).sort(([, a], [, b]) => (b as number) - (a as number));
                 const legendRows = Math.ceil(distinctColors.length / legendCols);
-                const legendH = (legendRows * (GROUP_H + GAP_Y)) + LEGEND_PADDING_TOP + 60;
+                const legendTitleH = 32;
+                const legendH = legendTitleH + (legendRows * (ITEM_H + GAP_Y)) + 16;
 
-                const totalH = HEADER_H + RULER_SIZE + gridH + RULER_SIZE + (PADDING * 2) + legendH + FOOTER_H;
+                const totalH = HEADER_H + RULER_SIZE + gridH + RULER_SIZE + (PADDING * 2) + LEGEND_PADDING_TOP + legendH + FOOTER_H;
 
                 const cvs = document.createElement('canvas');
                 cvs.width = totalW;
@@ -1189,28 +1194,28 @@ export const BrickMe: React.FC = () => {
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = '#0f172a';
-                ctx.font = 'bold 36px sans-serif';
+                ctx.font = 'bold 28px sans-serif';
                 const dispTitle = projectName.trim() || '拼豆手作图纸';
-                ctx.fillText(dispTitle, PADDING + 10, headerCenterY - 14);
+                ctx.fillText(dispTitle, PADDING + 10, headerCenterY - 12);
 
                 // Subtitle specs
                 ctx.fillStyle = '#64748b';
-                ctx.font = 'bold 18px sans-serif';
-                ctx.fillText(`${pattern.width} × ${pattern.height} px  •  共 ${totalBeads} 颗豆豆  •  ${distinctColors.length} 种颜色`, PADDING + 10, headerCenterY + 18);
+                ctx.font = 'bold 15px sans-serif';
+                ctx.fillText(`${pattern.width} × ${pattern.height} px  •  共 ${totalBeads} 颗豆豆  •  ${distinctColors.length} 种颜色`, PADDING + 10, headerCenterY + 14);
 
                 // Author Badge on top right
                 ctx.textAlign = 'right';
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = '#4f46e5';
-                ctx.font = 'bold 28px sans-serif';
+                ctx.font = 'bold 22px sans-serif';
                 ctx.fillText('图纸设计：@发疯拔萝卜', totalW - PADDING - 10, headerCenterY);
 
                 // Header Divider line
                 ctx.strokeStyle = '#e2e8f0';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
-                ctx.moveTo(PADDING, PADDING + HEADER_H - 10);
-                ctx.lineTo(totalW - PADDING, PADDING + HEADER_H - 10);
+                ctx.moveTo(PADDING, PADDING + HEADER_H - 6);
+                ctx.lineTo(totalW - PADDING, PADDING + HEADER_H - 6);
                 ctx.stroke();
 
                 const startX = PADDING + RULER_SIZE;
@@ -1218,9 +1223,8 @@ export const BrickMe: React.FC = () => {
 
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-
                 ctx.fillStyle = '#000000';
-                ctx.font = `bold ${PX_PER_CELL * 0.8}px sans-serif`;
+                ctx.font = `bold ${Math.max(10, Math.floor(PX_PER_CELL * 0.65))}px sans-serif`;
 
                 for (let x = 0; x < pattern.width; x++) {
                     const num = x + 1;
@@ -1299,16 +1303,20 @@ export const BrickMe: React.FC = () => {
                     ctx.stroke();
                 }
 
+                // --- 紧凑扁平色号表绘制 ---
                 const legendStartY = startY + gridH + RULER_SIZE + LEGEND_PADDING_TOP;
 
                 ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
                 ctx.fillStyle = '#0f172a';
-                ctx.font = 'bold 44px sans-serif';
-                ctx.fillText(`- 材料清单与色号表 (制作：@发疯拔萝卜) -`, totalW / 2, legendStartY - 40);
+                ctx.font = 'bold 22px sans-serif';
+                ctx.fillText(`- 材料清单与色号表 (制作：@发疯拔萝卜) -`, totalW / 2, legendStartY + (legendTitleH / 2));
 
-                const counts = Object.entries(pattern.counts).sort(([, a], [, b]) => (b as number) - (a as number));
+                const itemsStartY = legendStartY + legendTitleH + 6;
+                const totalRowW = (legendCols * ITEM_W) + ((legendCols - 1) * GAP_X);
+                const startLegendX = PADDING + Math.max(0, (legendAreaW - totalRowW) / 2);
 
-                counts.forEach((entry, idx) => {
+                distinctColors.forEach((entry, idx) => {
                     const [colorId, count] = entry;
                     const color = BEAD_COLORS.find(c => c.id === colorId);
                     if (!color) return;
@@ -1316,20 +1324,33 @@ export const BrickMe: React.FC = () => {
                     const col = idx % legendCols;
                     const row = Math.floor(idx / legendCols);
 
-                    const groupX = PADDING + (col * (GROUP_W + GAP_X)) + (GROUP_W / 2);
-                    const groupY = legendStartY + (row * (GROUP_H + GAP_Y));
+                    const itemX = startLegendX + (col * (ITEM_W + GAP_X));
+                    const itemY = itemsStartY + (row * (ITEM_H + GAP_Y));
 
-                    const swatchX = groupX - (SWATCH_SIZE / 2);
-                    const swatchY = groupY;
-
+                    // 外框卡片 (浅灰底微圆角)
                     ctx.beginPath();
-                    ctx.roundRect(swatchX, swatchY, SWATCH_SIZE, SWATCH_SIZE, 16);
-                    ctx.fillStyle = color.hex;
+                    ctx.roundRect(itemX, itemY, ITEM_W, ITEM_H, 6);
+                    ctx.fillStyle = '#f8fafc';
                     ctx.fill();
-                    ctx.lineWidth = 2;
-                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = '#e2e8f0';
                     ctx.stroke();
 
+                    // 左侧扁平色块
+                    const swatchW = 46;
+                    const swatchH = ITEM_H - 8;
+                    const swatchX = itemX + 4;
+                    const swatchY = itemY + 4;
+
+                    ctx.beginPath();
+                    ctx.roundRect(swatchX, swatchY, swatchW, swatchH, 4);
+                    ctx.fillStyle = color.hex;
+                    ctx.fill();
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+                    ctx.stroke();
+
+                    // 色块内色号字符
                     const r = parseInt(color.hex.slice(1, 3), 16);
                     const g = parseInt(color.hex.slice(3, 5), 16);
                     const b = parseInt(color.hex.slice(5, 7), 16);
@@ -1337,22 +1358,24 @@ export const BrickMe: React.FC = () => {
                     ctx.fillStyle = brightness > 140 ? '#000000' : '#FFFFFF';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.font = 'bold 32px sans-serif';
-                    ctx.fillText(color.symbol, groupX, swatchY + (SWATCH_SIZE / 2));
+                    ctx.font = 'bold 13px sans-serif';
+                    ctx.fillText(color.symbol, swatchX + (swatchW / 2), swatchY + (swatchH / 2));
 
+                    // 右侧紧凑颗粒数
+                    const countX = itemX + swatchW + ((ITEM_W - swatchW) / 2) + 2;
                     ctx.textAlign = 'center';
-                    ctx.textBaseline = 'top';
-                    ctx.fillStyle = '#000000';
-                    ctx.font = 'bold 36px monospace';
-                    ctx.fillText(`${count}`, groupX, swatchY + SWATCH_SIZE + 10);
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#0f172a';
+                    ctx.font = 'bold 14px monospace';
+                    ctx.fillText(`${count}`, countX, itemY + (ITEM_H / 2));
                 });
 
-                // Bottom Footer Signature
+                // Bottom Footer Signature (紧凑单行版权居底)
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = '#94a3b8';
-                ctx.font = 'bold 22px sans-serif';
-                ctx.fillText('🎨 拼豆图纸设计：@发疯拔萝卜  •  祝您拼装愉快！', totalW / 2, totalH - 30);
+                ctx.font = 'bold 15px sans-serif';
+                ctx.fillText('🎨 拼豆图纸设计：@发疯拔萝卜  •  祝您拼装愉快！', totalW / 2, totalH - (FOOTER_H / 2));
 
                 const authorTag = '@发疯拔萝卜';
                 const baseName = projectName.trim() || `拼豆图纸-${pattern.width}x${pattern.height}`;
