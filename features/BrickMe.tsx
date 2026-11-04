@@ -75,6 +75,94 @@ const getNearestBeadColor = (r: number, g: number, b: number) => {
     return nearest;
 };
 
+const deltaE2000 = (lab1: LabColor, lab2: LabColor): number => {
+    const deg2rad = Math.PI / 180;
+    const rad2deg = 180 / Math.PI;
+
+    const L1 = lab1.l, a1 = lab1.a, b1 = lab1.b;
+    const L2 = lab2.l, a2 = lab2.a, b2 = lab2.b;
+
+    const C1 = Math.sqrt(a1 * a1 + b1 * b1);
+    const C2 = Math.sqrt(a2 * a2 + b2 * b2);
+    const Cbar = (C1 + C2) / 2.0;
+
+    const G = 0.5 * (1 - Math.sqrt(Math.pow(Cbar, 7) / (Math.pow(Cbar, 7) + Math.pow(25, 7))));
+    const a1P = (1 + G) * a1;
+    const a2P = (1 + G) * a2;
+
+    const C1P = Math.sqrt(a1P * a1P + b1 * b1);
+    const C2P = Math.sqrt(a2P * a2P + b2 * b2);
+
+    let h1P = (Math.atan2(b1, a1P) * rad2deg + 360) % 360;
+    let h2P = (Math.atan2(b2, a2P) * rad2deg + 360) % 360;
+
+    const dLP = L2 - L1;
+    const dCP = C2P - C1P;
+
+    let dhP = 0;
+    if (C1P * C2P !== 0) {
+        if (Math.abs(h1P - h2P) <= 180) dhP = h2P - h1P;
+        else if (h2P <= h1P) dhP = h2P - h1P + 360;
+        else dhP = h2P - h1P - 360;
+    }
+    const dHP = 2 * Math.sqrt(C1P * C2P) * Math.sin((dhP * deg2rad) / 2);
+
+    const LbarP = (L1 + L2) / 2;
+    const CbarP = (C1P + C2P) / 2;
+    let hbarP = (h1P + h2P) / 2;
+    if (Math.abs(h1P - h2P) > 180) hbarP += (h1P + h2P < 360) ? 180 : -180;
+
+    const T = 1 - 0.17 * Math.cos((hbarP - 30) * deg2rad)
+                + 0.24 * Math.cos((2 * hbarP) * deg2rad)
+                + 0.32 * Math.cos((3 * hbarP + 6) * deg2rad)
+                - 0.20 * Math.cos((4 * hbarP - 63) * deg2rad);
+
+    const SL = 1 + (0.015 * Math.pow(LbarP - 50, 2)) / Math.sqrt(20 + Math.pow(LbarP - 50, 2));
+    const SC = 1 + 0.045 * CbarP;
+    const SH = 1 + 0.015 * CbarP * T;
+    const deltaTheta = 30 * Math.exp(-Math.pow((hbarP - 275) / 25, 2));
+    const RC = 2 * Math.sqrt(Math.pow(CbarP, 7) / (Math.pow(CbarP, 7) + Math.pow(25, 7)));
+    const RT = -RC * Math.sin(2 * deltaTheta * deg2rad);
+
+    return Math.sqrt(
+        Math.pow(dLP / SL, 2) +
+        Math.pow(dCP / SC, 2) +
+        Math.pow(dHP / SH, 2) +
+        RT * (dCP / SC) * (dHP / SH)
+    );
+};
+
+const getNearestBeadColorV2 = (r: number, g: number, b: number) => {
+    const targetLab = rgbToLab(r, g, b);
+    const isWarmSkin = (r > g) && (g >= b) && ((r - b) > 10) && (r > 70);
+
+    let minDeltaE = Infinity;
+    let nearest = BEAD_COLORS[0];
+
+    for (const bead of BEAD_LABS) {
+        let d = deltaE2000(targetLab, bead.lab);
+
+        if (isWarmSkin) {
+            const br = parseInt(bead.hex.substring(1, 3), 16);
+            const bg = parseInt(bead.hex.substring(3, 5), 16);
+            const bb = parseInt(bead.hex.substring(5, 7), 16);
+            
+            // 惩罚冷青/冷绿
+            if (bb > br || bg > br) d += 40.0;
+            if (bead.lab.a < 1.0) d += 30.0;
+            
+            // 惩罚面部刺眼纯白 (消灭突兀大白斑)
+            if (bead.id === 'H1' || bead.id === 'H2' || bead.id === 'A2') d += 35.0;
+        }
+
+        if (d < minDeltaE) {
+            minDeltaE = d;
+            nearest = bead;
+        }
+    }
+    return nearest;
+};
+
 // --- COMPONENT ---
 
 export const BrickMe: React.FC = () => {
@@ -83,7 +171,7 @@ export const BrickMe: React.FC = () => {
     const [pattern, setPattern] = useState<BeadPattern | null>(null);
 
     // --- WORKFLOW STATES ---
-    const [projectName, setProjectName] = useState('MyPattern');
+    const [projectName, setProjectName] = useState('拼豆图纸');
 
     // Image Adjustments
     const [imgBrightness, setImgBrightness] = useState(100);
@@ -95,7 +183,8 @@ export const BrickMe: React.FC = () => {
     const [showMobilePalette, setShowMobilePalette] = useState(false); // Bottom sheet state
 
     // Default to STANDARD board size (52)
-    const [boardSize, setBoardSize] = useState<number>(32);
+    const [boardSize, setBoardSize] = useState<number>(52);
+    const [algorithmMode, setAlgorithmMode] = useState<'v2' | 'v1'>('v2');
     const [isPixelating, setIsPixelating] = useState(false);
     const [statusMsg, setStatusMsg] = useState('');
 
@@ -104,7 +193,7 @@ export const BrickMe: React.FC = () => {
     const [isExporting, setIsExporting] = useState(false);
     const [showSymbols, setShowSymbols] = useState(false);
     const [showGrid, setShowGrid] = useState(false);
-    const [keepWhite, setKeepWhite] = useState(false);
+    const [keepWhite, setKeepWhite] = useState(true);
     const [showMobileTools, setShowMobileTools] = useState(false); // New state for expanding mobile toolbar
 
     // Touch Gesture State
@@ -133,10 +222,12 @@ export const BrickMe: React.FC = () => {
     const [isEditMode, setIsEditMode] = useState(false);
     const [selectedBrushColor, setSelectedBrushColor] = useState<BeadColor>(BEAD_COLORS[6]); // Default some color
     const [showColorPicker, setShowColorPicker] = useState(false);
-    const [activeTool, setActiveTool] = useState<'paint' | 'eraser' | 'eyedropper' | 'pan'>('paint');
+    const [activeTool, setActiveTool] = useState<'paint' | 'eraser' | 'eyedropper' | 'pan' | 'lasso'>('paint');
     const [isSymmetric, setIsSymmetric] = useState(false);
     const [brushSize, setBrushSize] = useState<1 | 2>(1); // 1 = 1x1, 2 = 2x2 (or 4x4 for eraser)
     const [isDrawingMouse, setIsDrawingMouse] = useState(false);
+    const [lassoPoints, setLassoPoints] = useState<{ x: number; y: number }[]>([]);
+    const [isLassoing, setIsLassoing] = useState(false);
 
     // Check for unload (refresh/close warning)
     useEffect(() => {
@@ -271,6 +362,95 @@ export const BrickMe: React.FC = () => {
         }
     };
 
+    // --- COLOR MERGE / REPLACE HELPERS ---
+    const handleManualMerge = (sourceId: string, targetId: string) => {
+        if (!pattern || sourceId === targetId) return;
+        const targetBead = BEAD_COLORS.find(b => b.id === targetId);
+        if (!targetBead) return;
+
+        const newCounts: Record<string, number> = {};
+        const newPixels = pattern.pixels.map(p => {
+            if (p.color.id === sourceId) {
+                newCounts[targetBead.id] = (newCounts[targetBead.id] || 0) + 1;
+                return { ...p, color: targetBead };
+            } else {
+                if (p.color.id) {
+                    newCounts[p.color.id] = (newCounts[p.color.id] || 0) + 1;
+                }
+                return p;
+            }
+        });
+
+        const newPattern: BeadPattern = {
+            ...pattern,
+            pixels: newPixels,
+            counts: newCounts
+        };
+
+        addToHistory(newPattern);
+        setMergeModal({ isOpen: false, sourceColor: null });
+    };
+
+    const handleAutoMergeSimilar = (threshold = 12) => {
+        if (!pattern) return;
+        const counts = { ...pattern.counts };
+        const sortedIds = Object.keys(counts).sort((a, b) => counts[a] - counts[b]);
+        const mergedMap: Record<string, string> = {};
+
+        sortedIds.forEach(cid => {
+            const curBead = BEAD_LABS.find(b => b.id === cid);
+            if (!curBead) return;
+
+            let bestTarget: string | null = null;
+            let minD = Infinity;
+
+            Object.keys(counts).forEach(targetId => {
+                if (targetId === cid) return;
+                if (counts[targetId] < counts[cid]) return;
+
+                const targetBead = BEAD_LABS.find(b => b.id === targetId);
+                if (!targetBead) return;
+
+                const d = deltaE2000(curBead.lab, targetBead.lab);
+                if (d < threshold && d < minD) {
+                    minD = d;
+                    bestTarget = targetId;
+                }
+            });
+
+            if (bestTarget) {
+                mergedMap[cid] = bestTarget;
+                counts[bestTarget] = (counts[bestTarget] || 0) + counts[cid];
+                delete counts[cid];
+            }
+        });
+
+        const mergedCount = Object.keys(mergedMap).length;
+        if (mergedCount === 0) {
+            alert(`当前没有检测到色差小于 ${threshold} 的相近色。可以尝试调大容差！`);
+            return;
+        }
+
+        const newCounts: Record<string, number> = {};
+        const newPixels = pattern.pixels.map(p => {
+            const finalId = mergedMap[p.color.id] || p.color.id;
+            const finalBead = BEAD_COLORS.find(b => b.id === finalId) || p.color;
+            if (finalBead.id) {
+                newCounts[finalBead.id] = (newCounts[finalBead.id] || 0) + 1;
+            }
+            return { ...p, color: finalBead };
+        });
+
+        const newPattern: BeadPattern = {
+            ...pattern,
+            pixels: newPixels,
+            counts: newCounts
+        };
+
+        addToHistory(newPattern);
+        setAutoMergeModal({ isOpen: false, threshold: 12 });
+    };
+
     // --- PIXEL EDITING LOGIC ---
     const handlePixelClick = (index: number) => {
         if (!pattern || !isEditMode) return;
@@ -367,13 +547,86 @@ export const BrickMe: React.FC = () => {
         setShowMobilePalette(false); // Close sheet on selection
     };
 
+    const applyLassoFill = (points: { x: number; y: number }[]) => {
+        if (!pattern || points.length < 2) {
+            setLassoPoints([]);
+            return;
+        }
+
+        const minX = Math.min(...points.map(p => p.x));
+        const maxX = Math.max(...points.map(p => p.x));
+        const minY = Math.min(...points.map(p => p.y));
+        const maxY = Math.max(...points.map(p => p.y));
+
+        const pointSet = new Set(points.map(p => `${p.x},${p.y}`));
+
+        const isInside = (px: number, py: number) => {
+            if (pointSet.has(`${px},${py}`)) return true;
+            if (points.length <= 4) {
+                return px >= minX && px <= maxX && py >= minY && py <= maxY;
+            }
+            let inside = false;
+            for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                const xi = points[i].x, yi = points[i].y;
+                const xj = points[j].x, yj = points[j].y;
+                const intersect = ((yi > py) !== (yj > py)) &&
+                    (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        };
+
+        let changed = false;
+        const newCounts: Record<string, number> = {};
+        const newPixels = pattern.pixels.map(p => {
+            if (isInside(p.x, p.y)) {
+                changed = true;
+                if (selectedBrushColor.id) {
+                    newCounts[selectedBrushColor.id] = (newCounts[selectedBrushColor.id] || 0) + 1;
+                }
+                return { ...p, color: selectedBrushColor };
+            } else {
+                if (p.color.id) {
+                    newCounts[p.color.id] = (newCounts[p.color.id] || 0) + 1;
+                }
+                return p;
+            }
+        });
+
+        if (changed) {
+            addToHistory({
+                ...pattern,
+                pixels: newPixels,
+                counts: newCounts
+            });
+        }
+        setLassoPoints([]);
+    };
+
     // --- MOUSE HANDLERS (DESKTOP SLIDE PAINT) ---
     const handleMouseDown = (index: number) => {
+        if (activeTool === 'lasso') {
+            setIsLassoing(true);
+            const w = pattern?.width || 1;
+            const pt = { x: index % w, y: Math.floor(index / w) };
+            setLassoPoints([pt]);
+            return;
+        }
         setIsDrawingMouse(true);
         handlePixelClick(index);
     };
 
     const handleMouseEnter = (index: number, e: React.MouseEvent) => {
+        if (activeTool === 'lasso' && isLassoing && pattern) {
+            const w = pattern.width;
+            const pt = { x: index % w, y: Math.floor(index / w) };
+            setLassoPoints(prev => {
+                const last = prev[prev.length - 1];
+                if (last && last.x === pt.x && last.y === pt.y) return prev;
+                return [...prev, pt];
+            });
+            return;
+        }
         // Only paint if we are in drawing state AND the primary button (1) is held down
         if (isDrawingMouse) {
             if (e.buttons === 1) {
@@ -385,6 +638,11 @@ export const BrickMe: React.FC = () => {
         }
     };
     const handleMouseUp = () => {
+        if (activeTool === 'lasso' && isLassoing) {
+            setIsLassoing(false);
+            applyLassoFill(lassoPoints);
+            return;
+        }
         setIsDrawingMouse(false);
     };
 
@@ -412,7 +670,7 @@ export const BrickMe: React.FC = () => {
                 setZoomLevel(newZoom);
             }
         } else if (e.touches.length === 1 && isEditMode && activeTab === 'preview' && activeTool !== 'pan') {
-            // Slide Painting Logic
+            // Slide Painting & Lasso Logic
             const touch = e.touches[0];
             const target = document.elementFromPoint(touch.clientX, touch.clientY);
             if (target) {
@@ -420,10 +678,28 @@ export const BrickMe: React.FC = () => {
                 if (cell) {
                     const index = parseInt(cell.dataset.pixelIndex || '-1');
                     if (index !== -1) {
-                        handlePixelClick(index);
+                        if (activeTool === 'lasso') {
+                            if (!isLassoing) setIsLassoing(true);
+                            const w = pattern?.width || 1;
+                            const pt = { x: index % w, y: Math.floor(index / w) };
+                            setLassoPoints(prev => {
+                                const last = prev[prev.length - 1];
+                                if (last && last.x === pt.x && last.y === pt.y) return prev;
+                                return [...prev, pt];
+                            });
+                        } else {
+                            handlePixelClick(index);
+                        }
                     }
                 }
             }
+        }
+    };
+
+    const onTouchEnd = () => {
+        if (activeTool === 'lasso' && isLassoing) {
+            setIsLassoing(false);
+            applyLassoFill(lassoPoints);
         }
     };
 
@@ -513,39 +789,36 @@ export const BrickMe: React.FC = () => {
 
             // ENABLE smoothing for better connectivity of thin lines during downscale
             ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
+            ctx.imageSmoothingQuality = 'low';
 
             // Clear canvas to transparent
             ctx.clearRect(0, 0, width, height);
-
-            // Apply Image Adjustments
-            ctx.filter = `brightness(${imgBrightness}%) saturate(${imgSaturation}%) contrast(${imgContrast}%)`;
+            ctx.filter = 'none';
 
             // Draw image exactly filling the calculated dimensions
             ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, width, height);
-
-            // Reset filter
-            ctx.filter = 'none';
 
             const imageData = ctx.getImageData(0, 0, width, height);
             const data = imageData.data;
 
             // --- STEP 1: SMART CONTRAST SNAP ---
-            for (let i = 0; i < data.length; i += 4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-                const a = data[i + 3];
+            if (algorithmMode === 'v1') {
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const a = data[i + 3];
 
-                if (a < 50) continue; // Skip transparency
+                    if (a < 50) continue; // Skip transparency
 
-                const isNeutral = Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && Math.abs(r - b) < 30;
+                    const isNeutral = Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && Math.abs(r - b) < 30;
 
-                if (isNeutral && r < 120) {
-                    data[i] = 0; data[i + 1] = 0; data[i + 2] = 0;
-                }
-                else if (isNeutral && r > 240) {
-                    data[i] = 255; data[i + 1] = 255; data[i + 2] = 255;
+                    if (isNeutral && r < 120) {
+                        data[i] = 0; data[i + 1] = 0; data[i + 2] = 0;
+                    }
+                    else if (isNeutral && r > 240) {
+                        data[i] = 255; data[i + 1] = 255; data[i + 2] = 255;
+                    }
                 }
             }
 
@@ -607,12 +880,14 @@ export const BrickMe: React.FC = () => {
                     if (visited[idx] === 1) continue;
                     if (!keepWhite && r > 240 && g > 240 && b > 240) continue;
 
-                    const matchedColor = getNearestBeadColor(r, g, b);
+                    const matchedColor = algorithmMode === 'v2' 
+                        ? getNearestBeadColorV2(r, g, b) 
+                        : getNearestBeadColor(r, g, b);
                     rawPixels.push({ x, y, color: matchedColor });
                 }
             }
 
-            if (rawPixels.length > 0) {
+            if (rawPixels.length > 0 && algorithmMode === 'v1') {
                 const tempCounts: Record<string, number> = {};
                 rawPixels.forEach(p => {
                     tempCounts[p.color.id] = (tempCounts[p.color.id] || 0) + 1;
@@ -680,6 +955,46 @@ export const BrickMe: React.FC = () => {
                 fullGrid[newY * trimmedWidth + newX] = p.color;
             });
 
+            // V2 Tolerance Region Merge (大色块平整化，消除孤立碎噪点，保眼睛五官)
+            if (algorithmMode === 'v2') {
+                for (let pass = 0; pass < 2; pass++) {
+                    for (let y = 1; y < trimmedHeight - 1; y++) {
+                        for (let x = 1; x < trimmedWidth - 1; x++) {
+                            const idx = y * trimmedWidth + x;
+                            const cur = fullGrid[idx];
+                            if (!cur || !cur.id) continue;
+                            const neighbors = [
+                                fullGrid[(y - 1) * trimmedWidth + x], fullGrid[(y + 1) * trimmedWidth + x],
+                                fullGrid[y * trimmedWidth + x - 1], fullGrid[y * trimmedWidth + x + 1],
+                                fullGrid[(y - 1) * trimmedWidth + x - 1], fullGrid[(y - 1) * trimmedWidth + x + 1],
+                                fullGrid[(y + 1) * trimmedWidth + x - 1], fullGrid[(y + 1) * trimmedWidth + x + 1]
+                            ].filter(Boolean) as BeadColor[];
+                            const same = neighbors.filter(n => n.id === cur.id).length;
+                            if (same <= 1) {
+                                const nCounts: Record<string, number> = {};
+                                neighbors.forEach(n => nCounts[n.id] = (nCounts[n.id] || 0) + 1);
+                                const topId = Object.keys(nCounts).sort((a, b) => nCounts[b] - nCounts[a])[0];
+                                if (topId && nCounts[topId] >= 5) {
+                                    const topBead = BEAD_LABS.find(c => c.id === topId);
+                                    const curBead = BEAD_LABS.find(c => c.id === cur.id);
+                                    if (topBead && curBead) {
+                                        const diff = deltaE2000(curBead.lab, topBead.lab);
+                                        if (diff < 18) {
+                                            fullGrid[idx] = topBead;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Refresh final counts
+                Object.keys(finalCounts).forEach(k => delete finalCounts[k]);
+                fullGrid.forEach(c => {
+                    if (c && c.id) finalCounts[c.id] = (finalCounts[c.id] || 0) + 1;
+                });
+            }
+
             const gridPixels: BeadPixel[] = fullGrid.map((color, idx) => ({
                 x: idx % trimmedWidth,
                 y: Math.floor(idx / trimmedWidth),
@@ -705,19 +1020,21 @@ export const BrickMe: React.FC = () => {
                 const c = BEAD_COLORS.find(bc => bc.id === mostProminent[0]);
                 if (c) setSelectedBrushColor(c);
             }
-            setTimeout(handleAutoFit, 100);
+            setTimeout(() => handleAutoFit(initialPattern), 150);
         };
     };
 
-    const handleAutoFit = () => {
-        if (!pattern || !viewportRef.current) return;
+    const handleAutoFit = (targetPattern?: BeadPattern) => {
+        const p = targetPattern || pattern;
+        if (!p || !viewportRef.current) return;
         const { clientWidth, clientHeight } = viewportRef.current;
+        if (clientWidth === 0 || clientHeight === 0) return;
         const padding = 60;
         const availableW = clientWidth - padding;
         const availableH = clientHeight - padding;
 
-        const contentW = (pattern.width + 1) * BASE_CELL_SIZE;
-        const contentH = (pattern.height + 1) * BASE_CELL_SIZE;
+        const contentW = (p.width + 1) * BASE_CELL_SIZE;
+        const contentH = (p.height + 1) * BASE_CELL_SIZE;
 
         const scaleW = availableW / contentW;
         const scaleH = availableH / contentH;
@@ -725,6 +1042,14 @@ export const BrickMe: React.FC = () => {
         const newZoom = Math.min(scaleW, scaleH, 1.2);
         setZoomLevel(Math.max(0.05, newZoom));
     };
+
+    // Auto-fit whenever pattern changes or tab changes to preview
+    useEffect(() => {
+        if (pattern && activeTab === 'preview') {
+            const timer = setTimeout(() => handleAutoFit(pattern), 100);
+            return () => clearTimeout(timer);
+        }
+    }, [pattern, activeTab]);
 
     // --- EXPORT FUNCTION ---
     const handleExport = (format: 'png' | 'pdf') => {
@@ -745,6 +1070,8 @@ export const BrickMe: React.FC = () => {
 
                 const RULER_SIZE = PX_PER_CELL * 1.5;
                 const PADDING = 40;
+                const HEADER_H = 100;
+                const FOOTER_H = 70;
 
                 const gridW = pattern.width * PX_PER_CELL;
                 const gridH = pattern.height * PX_PER_CELL;
@@ -757,14 +1084,14 @@ export const BrickMe: React.FC = () => {
                 const GAP_Y = 40;
                 const LEGEND_PADDING_TOP = 100;
 
-                const totalW = Math.max(RULER_SIZE + gridW + RULER_SIZE + (PADDING * 2), 800);
+                const totalW = Math.max(RULER_SIZE + gridW + RULER_SIZE + (PADDING * 2), 900);
                 const legendAreaW = totalW - (PADDING * 2);
-                const legendCols = Math.floor(legendAreaW / (GROUP_W + GAP_X));
+                const legendCols = Math.max(1, Math.floor(legendAreaW / (GROUP_W + GAP_X)));
                 const distinctColors = Object.entries(pattern.counts);
                 const legendRows = Math.ceil(distinctColors.length / legendCols);
-                const legendH = (legendRows * (GROUP_H + GAP_Y)) + LEGEND_PADDING_TOP + 100;
+                const legendH = (legendRows * (GROUP_H + GAP_Y)) + LEGEND_PADDING_TOP + 60;
 
-                const totalH = RULER_SIZE + gridH + RULER_SIZE + (PADDING * 2) + legendH;
+                const totalH = HEADER_H + RULER_SIZE + gridH + RULER_SIZE + (PADDING * 2) + legendH + FOOTER_H;
 
                 const cvs = document.createElement('canvas');
                 cvs.width = totalW;
@@ -775,8 +1102,40 @@ export const BrickMe: React.FC = () => {
                 ctx.fillStyle = '#FFFFFF';
                 ctx.fillRect(0, 0, cvs.width, cvs.height);
 
+                // --- TOP BANNER (PROJECT TITLE + AUTHOR BADGE) ---
+                const headerCenterY = PADDING + (HEADER_H / 2);
+                const totalBeads = pattern.pixels.filter(p => p.color.hex !== 'transparent').length;
+
+                // Title
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#0f172a';
+                ctx.font = 'bold 36px sans-serif';
+                const dispTitle = projectName.trim() || '拼豆手作图纸';
+                ctx.fillText(dispTitle, PADDING + 10, headerCenterY - 14);
+
+                // Subtitle specs
+                ctx.fillStyle = '#64748b';
+                ctx.font = 'bold 18px sans-serif';
+                ctx.fillText(`${pattern.width} × ${pattern.height} px  •  共 ${totalBeads} 颗豆豆  •  ${distinctColors.length} 种颜色`, PADDING + 10, headerCenterY + 18);
+
+                // Author Badge on top right
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#4f46e5';
+                ctx.font = 'bold 28px sans-serif';
+                ctx.fillText('图纸设计：@发疯拔萝卜', totalW - PADDING - 10, headerCenterY);
+
+                // Header Divider line
+                ctx.strokeStyle = '#e2e8f0';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(PADDING, PADDING + HEADER_H - 10);
+                ctx.lineTo(totalW - PADDING, PADDING + HEADER_H - 10);
+                ctx.stroke();
+
                 const startX = PADDING + RULER_SIZE;
-                const startY = PADDING + RULER_SIZE;
+                const startY = PADDING + HEADER_H + RULER_SIZE;
 
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
@@ -789,7 +1148,7 @@ export const BrickMe: React.FC = () => {
                     if (num % 5 === 0) {
                         const cx = startX + (x * PX_PER_CELL) + (PX_PER_CELL / 2);
                         const label = (num / 5).toString();
-                        ctx.fillText(label, cx, PADDING + (RULER_SIZE / 2));
+                        ctx.fillText(label, cx, startY - (RULER_SIZE / 2));
                         ctx.fillText(label, cx, startY + gridH + (RULER_SIZE / 2));
                     }
                 }
@@ -865,8 +1224,8 @@ export const BrickMe: React.FC = () => {
 
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#0f172a';
-                ctx.font = 'bold 48px sans-serif';
-                ctx.fillText(`- 调色板: 拼豆礼坊 V1 -`, totalW / 2, legendStartY - 40);
+                ctx.font = 'bold 44px sans-serif';
+                ctx.fillText(`- 材料清单与色号表 (制作：@发疯拔萝卜) -`, totalW / 2, legendStartY - 40);
 
                 const counts = Object.entries(pattern.counts).sort(([, a], [, b]) => (b as number) - (a as number));
 
@@ -909,7 +1268,16 @@ export const BrickMe: React.FC = () => {
                     ctx.fillText(`${count}`, groupX, swatchY + SWATCH_SIZE + 10);
                 });
 
-                const finalName = projectName.trim() || `bead-gift-${pattern.width}x${pattern.height}`;
+                // Bottom Footer Signature
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = 'bold 22px sans-serif';
+                ctx.fillText('🎨 拼豆图纸设计：@发疯拔萝卜  •  祝您拼装愉快！', totalW / 2, totalH - 30);
+
+                const authorTag = '@发疯拔萝卜';
+                const baseName = projectName.trim() || `拼豆图纸-${pattern.width}x${pattern.height}`;
+                const finalName = `${baseName}_${authorTag}`;
 
                 if (format === 'png') {
                     const link = document.createElement('a');
@@ -1012,7 +1380,6 @@ export const BrickMe: React.FC = () => {
                                     src={originalImage}
                                     className="w-full h-full object-contain bg-slate-50 p-2 transition-all duration-300"
                                     alt="Original"
-                                    style={{ filter: `brightness(${imgBrightness}%) saturate(${imgSaturation}%) contrast(${imgContrast}%)` }}
                                 />
                             ) : (
                                 <div className="text-center p-4">
@@ -1046,60 +1413,68 @@ export const BrickMe: React.FC = () => {
 
                         <div className="space-y-4">
 
-                            {/* Pro Tip: Mobile Pre-processing */}
-                            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex gap-3 text-xs text-blue-800 leading-relaxed mb-4">
-                                <span className="text-lg">💡</span>
-                                <div>
-                                    <span className="font-bold">小贴士：</span> 这里的调整功能比较基础。如果想要更好的色彩效果，建议您<b>先在手机相册里</b>把图片的对比度、饱和度调高一些，再上传到这里转换，效果会像魔法一样好哦！✨
+                            {/* 使用指南说明 */}
+                            <div className="bg-gradient-to-br from-indigo-50/90 to-blue-50/60 p-4 rounded-xl border border-indigo-100 space-y-3">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-base">📖</span>
+                                    <span className="text-sm font-black text-indigo-900 tracking-wide">拼豆转图指南</span>
                                 </div>
-                            </div>
+                                
+                                <div className="space-y-2.5 text-[12px] text-slate-700 leading-relaxed">
+                                    {/* 1 */}
+                                    <div className="flex items-start gap-2">
+                                        <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                                        <div><b>色彩微调</b>：如果色彩仍不符合预期，可以先对原图调色后再次尝试上传。</div>
+                                    </div>
 
-                            {/* NEW: Image Adjustments */}
-                            <div className="bg-slate-50 p-4 rounded-xl space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-xs font-bold text-slate-500">图片预处理</label>
-                                    <button
-                                        onClick={() => { setImgBrightness(100); setImgSaturation(100); setImgContrast(100); }}
-                                        className="text-[10px] text-blue-500 font-bold hover:underline"
-                                    >
-                                        重置
-                                    </button>
-                                </div>
+                                    {/* 2 */}
+                                    <div className="flex items-start gap-2">
+                                        <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                                        <div><b>算法选择</b>：旧算法 (算法1) 边缘分明锐利，新算法 (算法2) 肤色保护消灭白斑死黑，两者可自行择优。</div>
+                                    </div>
 
-                                {/* Brightness */}
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xs font-bold text-slate-400 w-8">亮度</span>
-                                    <input
-                                        type="range" min="50" max="150" step="5"
-                                        value={imgBrightness}
-                                        onChange={(e) => setImgBrightness(Number(e.target.value))}
-                                        className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                                    />
-                                    <span className="text-xs font-mono text-slate-500 w-8 text-right">{imgBrightness}%</span>
-                                </div>
+                                    {/* 3 */}
+                                    <div className="flex items-start gap-2">
+                                        <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+                                        <div><b>选图建议</b>：不适合人脸占比太小的全身或远景照片（像素有限时面部容易糊掉），建议先裁剪出大头照或特写效果最佳。</div>
+                                    </div>
 
-                                {/* Saturation */}
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xs font-bold text-slate-400 w-8">鲜艳</span>
-                                    <input
-                                        type="range" min="0" max="200" step="5"
-                                        value={imgSaturation}
-                                        onChange={(e) => setImgSaturation(Number(e.target.value))}
-                                        className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                                    />
-                                    <span className="text-xs font-mono text-slate-500 w-8 text-right">{imgSaturation}%</span>
-                                </div>
-
-                                {/* Contrast */}
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xs font-bold text-slate-400 w-8">对比</span>
-                                    <input
-                                        type="range" min="50" max="150" step="5"
-                                        value={imgContrast}
-                                        onChange={(e) => setImgContrast(Number(e.target.value))}
-                                        className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                                    />
-                                    <span className="text-xs font-mono text-slate-500 w-8 text-right">{imgContrast}%</span>
+                                    {/* 4 */}
+                                    <div className="bg-white/90 p-3 rounded-lg border border-indigo-100 space-y-2 mt-1">
+                                        <div className="font-bold text-indigo-950 flex items-center gap-1.5 text-xs">
+                                            <span>✏️</span>
+                                            <span><b>编辑豆豆功能介绍</b>（为什么需要它？）</span>
+                                        </div>
+                                        <p className="text-[11px] text-slate-600 leading-normal">
+                                            有时候局部不够好看可以用它来修改，比如<b>嘴唇改色、人脸高光阴影局部处理、眼睛点高光</b>等：
+                                        </p>
+                                        <div className="grid grid-cols-1 gap-1.5 text-[11px] text-slate-700 pt-1.5 border-t border-indigo-50">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-bold shrink-0">↩️ 撤回键</span>
+                                                <span>画错了可以反悔。</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-bold shrink-0">✋ 抓手键</span>
+                                                <span>用来移动位置，不影响画面。</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-bold shrink-0">🎨 画笔键</span>
+                                                <span>再点一次可以选好颜色，也可以和右边颜色按钮配合使用。</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-bold shrink-0">💉 吸管键</span>
+                                                <span>吸取画面中你想要的颜色。</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-bold shrink-0">➰ 套索键</span>
+                                                <span>圈选区域，松开直接把这块色大面积改成吸取的颜色。</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-bold shrink-0">🧼 橡皮擦</span>
+                                                <span>擦去不需要的颜色。</span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1135,6 +1510,32 @@ export const BrickMe: React.FC = () => {
                                 </div>
 
                                 {estimationUI}
+
+                                {/* Algorithm Engine Switch */}
+                                <div className="bg-slate-100 p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-xs font-bold text-slate-700">算法模式</span>
+                                        <div className="flex gap-1 bg-slate-200/80 p-0.5 rounded-lg text-xs">
+                                            <button
+                                                type="button"
+                                                onClick={() => setAlgorithmMode('v1')}
+                                                className={`px-2.5 py-1 rounded-md font-bold transition-all ${algorithmMode === 'v1' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                            >
+                                                算法1 (经典原版)
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAlgorithmMode('v2')}
+                                                className={`px-2.5 py-1 rounded-md font-bold transition-all ${algorithmMode === 'v2' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                            >
+                                                算法2 (V2 增强版)
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">
+                                        {algorithmMode === 'v2' ? '推荐真人/写实照：软高光收拢，暖肤色保护，消灭突兀白斑与死黑' : '推荐插画/Icon：锐利边缘，高对比纯色块'}
+                                    </p>
+                                </div>
 
                                 {/* White Bead Toggle */}
                                 <div className="flex items-center gap-2">
@@ -1229,12 +1630,16 @@ export const BrickMe: React.FC = () => {
 
                         {/* Export Controls */}
                         <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold bg-indigo-50 text-indigo-700 px-2.5 py-2 rounded-lg border border-indigo-200 hidden md:inline-flex items-center gap-1 shadow-sm" title="图纸设计署名">
+                                <span>✍️</span>
+                                <span>@发疯拔萝卜</span>
+                            </span>
                             <input
                                 type="text"
                                 value={projectName}
                                 onChange={(e) => setProjectName(e.target.value)}
                                 placeholder="项目名称"
-                                className="w-32 lg:w-48 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 font-bold text-slate-600"
+                                className="w-28 lg:w-40 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 font-bold text-slate-600"
                             />
                             <div className="flex bg-indigo-600 rounded-lg p-0.5 shadow-sm">
                                 <button
@@ -1301,6 +1706,15 @@ export const BrickMe: React.FC = () => {
                                     >
                                         <span className="text-sm">💉</span>
                                         <span className="text-sm font-bold">吸管</span>
+                                    </button>
+
+                                    <button
+                                        onClick={() => setActiveTool('lasso')}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border-2 transition-all ${activeTool === 'lasso' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm' : 'bg-white border-transparent hover:bg-slate-50 text-slate-600'}`}
+                                        title="套索工具 (在画布上圈选范围，松开直接把选区批量改为当前吸取的颜色)"
+                                    >
+                                        <span className="text-sm">➰</span>
+                                        <span className="text-sm font-bold">套索改色</span>
                                     </button>
 
                                     <button
@@ -1400,6 +1814,7 @@ export const BrickMe: React.FC = () => {
                         className="flex-1 relative overflow-auto bg-slate-100 print:overflow-visible print:bg-white print:h-auto"
                         onTouchStart={onTouchStart}
                         onTouchMove={onTouchMove}
+                        onTouchEnd={onTouchEnd}
                     >
 
 
@@ -1517,14 +1932,36 @@ export const BrickMe: React.FC = () => {
 
                                         {/* Grid */}
                                         <div
-                                            className={`select-none ${showGrid ? 'border-t border-l border-slate-300' : ''}`}
+                                            className={`select-none relative ${showGrid ? 'border-t border-l border-slate-300' : ''}`}
                                             style={{
                                                 display: 'grid',
                                                 gridTemplateColumns: `repeat(${pattern.width}, ${cellSize}px)`,
                                                 width: `${pattern.width * cellSize}px`,
                                             }}
-                                            onMouseLeave={() => { /* Potential drag end logic */ }}
+                                            onMouseLeave={() => {
+                                                if (isLassoing) {
+                                                    setIsLassoing(false);
+                                                    applyLassoFill(lassoPoints);
+                                                }
+                                                setIsDrawingMouse(false);
+                                            }}
+                                            onMouseUp={handleMouseUp}
                                         >
+                                            {/* Lasso SVG overlay */}
+                                            {activeTool === 'lasso' && lassoPoints.length > 0 && (
+                                                <svg
+                                                    className="absolute inset-0 pointer-events-none z-30"
+                                                    style={{ width: `${pattern.width * cellSize}px`, height: `${pattern.height * cellSize}px` }}
+                                                >
+                                                    <polygon
+                                                        points={lassoPoints.map(pt => `${(pt.x + 0.5) * cellSize},${(pt.y + 0.5) * cellSize}`).join(' ')}
+                                                        fill="rgba(99, 102, 241, 0.3)"
+                                                        stroke="#6366f1"
+                                                        strokeWidth="2"
+                                                        strokeDasharray="4 2"
+                                                    />
+                                                </svg>
+                                            )}
                                             {pattern.pixels.map((p, i) => {
                                                 // Contrast calculation for text
                                                 let textColor = 'transparent';
@@ -1648,9 +2085,11 @@ export const BrickMe: React.FC = () => {
                     pattern && (
                         <div className={`h-48 bg-white rounded-2xl shadow-sm border border-slate-200 flex-col shrink-0 no-print lg:flex ${showPalette ? 'flex h-auto flex-1' : 'hidden'}`}>
                             <div className={`px-4 py-2 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between items-center ${isEditMode ? 'bg-indigo-50' : ''}`}>
-                                <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
-                                    {isEditMode ? '🎨 调色板 (点击下方选择画笔)' : '材料清单'}
-                                </h3>
+                                <div className="flex items-center gap-3">
+                                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-wide">
+                                        {isEditMode ? '🎨 调色板 (点击选择画笔/改色)' : '材料清单 (点击选择画笔)'}
+                                    </h3>
+                                </div>
                                 <span className="text-xs font-bold text-slate-400">{pattern.pixels.filter(p => p.color.hex !== 'transparent').length} 颗 • {Object.keys(pattern.counts).length} 色</span>
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
@@ -1667,17 +2106,22 @@ export const BrickMe: React.FC = () => {
                                             const brightness = (r * 299 + g * 587 + b * 114) / 1000;
                                             const textCol = brightness > 140 ? '#000' : '#FFF';
 
-                                            const isSelected = isEditMode && activeTool === 'paint' && selectedBrushColor.id === color.id;
+                                            const isSelected = isEditMode && selectedBrushColor.id === color.id;
 
                                             return (
                                                 <div
                                                     key={colorId}
-                                                    onClick={() => isEditMode && selectColor(color)}
+                                                    onClick={() => {
+                                                        setSelectedBrushColor(color);
+                                                        if (!isEditMode) {
+                                                            setIsEditMode(true);
+                                                        }
+                                                    }}
                                                     className={`
-                                                    flex items-center gap-3 pr-4 pl-1 py-1 rounded-full border transition-all 
-                                                    ${isEditMode ? 'cursor-pointer' : ''}
-                                                    ${isSelected ? 'bg-indigo-600 border-indigo-600 shadow-md ring-2 ring-indigo-200 text-white' : 'bg-slate-50 border-slate-100 hover:border-slate-300'}
+                                                    group relative flex items-center gap-2 pr-3 pl-1 py-1 rounded-full border transition-all cursor-pointer
+                                                    ${isSelected ? 'bg-indigo-600 border-indigo-600 shadow-md ring-2 ring-indigo-200 text-white' : 'bg-slate-50 border-slate-100 hover:border-indigo-400 hover:bg-indigo-50/50'}
                                                 `}
+                                                    title="点击选择画笔，配合套索或画笔修改颜色"
                                                 >
                                                     <div
                                                         className="w-8 h-8 rounded-full border border-black/10 shadow-sm flex items-center justify-center text-[10px] font-bold shrink-0"
@@ -1801,6 +2245,15 @@ export const BrickMe: React.FC = () => {
                                     className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all border active:scale-95 ${activeTool === 'eyedropper' ? 'bg-amber-100 text-amber-600 border-amber-200 scale-105 shadow-md shadow-amber-100' : 'bg-white text-slate-400 border-slate-200'}`}
                                 >
                                     💉
+                                </button>
+
+                                {/* Lasso Tool */}
+                                <button
+                                    onClick={() => setActiveTool('lasso')}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all border active:scale-95 ${activeTool === 'lasso' ? 'bg-indigo-100 text-indigo-600 border-indigo-300 scale-105 shadow-md shadow-indigo-100' : 'bg-white text-slate-400 border-slate-200'}`}
+                                    title="套索填充"
+                                >
+                                    ➰
                                 </button>
 
                                 {/* Eraser Tool */}
@@ -2129,6 +2582,7 @@ export const BrickMe: React.FC = () => {
                     </div>
                 )
             }
-        </div >
+
+                    </div >
     );
 };

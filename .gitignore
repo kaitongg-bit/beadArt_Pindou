@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+bead_tester.html
+samples/
+.skill/
+.claude/
+.codex/
+*.skill
+*.zip
