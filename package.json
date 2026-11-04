@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:xhs": "node scripts/build_xhs.js",
     "preview": "vite preview"
   },
   "dependencies": {
