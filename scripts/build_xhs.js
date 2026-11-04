@@ -49,14 +49,21 @@ html = html.replace(
   'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;'
 );
 
-// 移除 module 与 crossorigin，确保为符合规范的离线经典脚本
+// 移除 head 里的 app.js 引用，规范移动至 body 底部（在 #root 之后），并增加 defer
+html = html.replace(/<script[^>]*src="[^"]*app\.js"[^>]*><\/script>/g, '');
 html = html.replace(
-  /<script type="module" crossorigin src="\.\/assets\/app\.js"><\/script>/g,
-  '<script src="./assets/app.js"></script>'
+  /<div id="root"><\/div>/,
+  '<div id="root"></div>\n    <script defer src="./assets/app.js"></script>'
+);
+
+// 增强 viewport 配置以适配小红书真机与安全区
+html = html.replace(
+  /<meta name="viewport"[^>]*>/,
+  '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />'
 );
 
 fs.writeFileSync(indexPath, html, 'utf-8');
-console.log('   ✅ dist-xhs/index.html 离线化与 CSP 合规修复完成');
+console.log('   ✅ dist-xhs/index.html 离线化与 CSP 合规修复完成 (脚本已移至 #root 之后)');
 
 console.log('🔍 3. 运行静态资源目录审计 (audit_artifact.py)...');
 const auditScript = path.join(rootDir, '.skill', 'minitool-zip-builder', 'scripts', 'audit_artifact.py');
