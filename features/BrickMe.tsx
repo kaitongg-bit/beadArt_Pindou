@@ -166,6 +166,9 @@ const getNearestBeadColorV2 = (r: number, g: number, b: number) => {
 // --- COMPONENT ---
 
 export const BrickMe: React.FC = () => {
+    // 检测是否为小红书小工具环境（通过平台注入的 window.xhs 或编译期目标）
+    const isXhs = (typeof window !== 'undefined' && Boolean((window as any).xhs)) || Boolean(import.meta.env.VITE_APP_TARGET === 'xhs');
+
     const [originalImage, setOriginalImage] = useState<string | null>(null);
     const [imageDimensions, setImageDimensions] = useState<{ width: number, height: number } | null>(null);
     const [pattern, setPattern] = useState<BeadPattern | null>(null);
@@ -1280,10 +1283,28 @@ export const BrickMe: React.FC = () => {
                 const finalName = `${baseName}_${authorTag}`;
 
                 if (format === 'png') {
-                    const link = document.createElement('a');
-                    link.download = `${finalName}.png`;
-                    link.href = cvs.toDataURL('image/png');
-                    link.click();
+                    const dataUrl = cvs.toDataURL('image/png');
+                    const miniTool = typeof window !== 'undefined' && (window as any).xhs && (window as any).xhs.miniTool;
+                    if (miniTool && typeof miniTool.saveImageToPhotosAlbum === 'function') {
+                        miniTool.saveImageToPhotosAlbum({
+                            filePath: dataUrl,
+                            success: () => {
+                                alert('🎉 拼豆图纸已成功保存到您的系统相册！');
+                            },
+                            fail: (err: any) => {
+                                console.warn('小红书保存相册降级为浏览器下载', err);
+                                const link = document.createElement('a');
+                                link.download = `${finalName}.png`;
+                                link.href = dataUrl;
+                                link.click();
+                            }
+                        });
+                    } else {
+                        const link = document.createElement('a');
+                        link.download = `${finalName}.png`;
+                        link.href = dataUrl;
+                        link.click();
+                    }
                 } else {
                     const pdf = new jsPDF({
                         orientation: cvs.width > cvs.height ? 'l' : 'p',
@@ -1649,14 +1670,18 @@ export const BrickMe: React.FC = () => {
                                 >
                                     PNG
                                 </button>
-                                <div className="w-[1px] bg-white/20 my-1"></div>
-                                <button
-                                    onClick={() => handleExport('pdf')}
-                                    disabled={!pattern || isExporting}
-                                    className="px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20 rounded-md transition-colors disabled:opacity-50"
-                                >
-                                    PDF
-                                </button>
+                                {!isXhs && (
+                                    <>
+                                        <div className="w-[1px] bg-white/20 my-1"></div>
+                                        <button
+                                            onClick={() => handleExport('pdf')}
+                                            disabled={!pattern || isExporting}
+                                            className="px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20 rounded-md transition-colors disabled:opacity-50"
+                                        >
+                                            PDF
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </div>
